@@ -1,0 +1,20 @@
+# Sui build artefacts
+build/
+
+# Move package lock file
+Move.lock
+
+# Sui client keystore and config — never commit private keys
+sui.keystore
+sui.aliases
+client.yaml
+.sui/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

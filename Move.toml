@@ -1,0 +1,9 @@
+[package]
+edition = "2024"
+name = "sui_token_template"
+version = "1.0.0"
+license = "CC0-1.0"
+
+
+[addresses]
+sui_token_template = "0x0"

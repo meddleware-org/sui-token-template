@@ -1,0 +1,40 @@
+{
+  "name": "@meddleware/sui-token-template",
+  "version": "1.0.0",
+  "private": false,
+  "type": "module",
+  "author": "MeddleWare <meddleware@proton.me>",
+  "license": "CC0-1.0",
+  "description": "Generic Sui coin template and deployment pipeline for generating immutable coin packages. Ships the Move source, generator scripts, and the text files consumed by downstream source generators.",
+  "homepage": "https://github.com/meddleware-org/sui-token-template#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/meddleware-org/sui-token-template.git"
+  },
+  "bugs": {
+    "url": "https://github.com/meddleware-org/sui-token-template/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "sui move test --build-env testnet"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "Move.toml",
+    "sources/",
+    "templates/",
+    "scripts/",
+    "docs/",
+    "README.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.18.0 || >=24.12.0"
+  }
+}
