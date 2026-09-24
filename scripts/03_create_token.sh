@@ -133,9 +133,9 @@ if [[ ! -f "$TEMPLATE_LICENSE" ]]; then
     exit 1
 fi
 
-TEMPLATE_GITIGNORE="$TEMPLATE_DIR/templates/.gitignore"
+TEMPLATE_GITIGNORE="$TEMPLATE_DIR/templates/gitignore"
 if [[ ! -f "$TEMPLATE_GITIGNORE" ]]; then
-    echo "ERROR: Template .gitignore not found at $TEMPLATE_GITIGNORE" >&2
+    echo "ERROR: Template gitignore not found at $TEMPLATE_GITIGNORE" >&2
     exit 1
 fi
 

@@ -421,7 +421,7 @@ export TOKEN_NAME="My Token"
 export TOKEN_DESCRIPTION="A custom ERC-20 equivalent on Sui"
 export TOKEN_DECIMALS="8"
 export TOKEN_IMAGE_PATH="assets/img/mytoken.png"
-export OUTPUT_DIR="blockchain/sui/mytoken_token"
+export OUTPUT_DIR="mytoken_token"
 export TREASURY_ADDRESS="0x<governance-multisig>"
 export NETWORK="mainnet"  # or "testnet" for testing
 ```

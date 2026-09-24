@@ -69,7 +69,7 @@ This ensures:
 │   ├── deploy_token.sh          # Full deployment pipeline
 │   └── publish.sh               # Simple build + publish wrapper
 ├── templates/
-│   ├── .gitignore               # Copied verbatim into generated packages (no Move.lock entry)
+│   ├── gitignore                # Copied as .gitignore into generated packages (no Move.lock entry)
 │   ├── publish.sh               # Copied verbatim into generated packages
 │   ├── README.md                # Substituted into generated packages
 │   └── deployments.md           # Substituted into generated packages
