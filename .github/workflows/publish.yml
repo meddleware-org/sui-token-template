@@ -1,0 +1,58 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  # ── Move tests — always run on tag ─────────────────────────────────────────
+  test:
+    name: Move tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Install suiup
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install Sui CLI (testnet channel)
+        run: |
+          suiup install sui@testnet-v1.80.0
+          suiup switch sui@testnet-v1.80.0
+
+      - name: Verify Sui version
+        run: sui --version
+
+      - name: Build and test
+        run: sui move test --build-env testnet
+
+  # ── npmjs publish — gated by NPM_PUBLISH variable ──────────────────────────
+  # Set the repository variable NPM_PUBLISH=true to enable.
+  # Uses OIDC trusted publisher — no static NPM_TOKEN secret required.
+  publish-npm:
+    name: npmjs (@meddleware/sui-token-template)
+    needs: test
+    if: vars.NPM_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish to npmjs (provenance via OIDC, idempotent)
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@meddleware/sui-token-template@${VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::v${VERSION} already published to npmjs — skipping"
+          else
+            npm publish --provenance
+          fi
