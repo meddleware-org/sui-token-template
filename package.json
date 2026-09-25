@@ -1,6 +1,6 @@
 {
   "name": "@meddleware/sui-token-template",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": false,
   "type": "module",
   "author": "MeddleWare <meddleware@proton.me>",
