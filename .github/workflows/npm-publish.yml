@@ -28,6 +28,18 @@ jobs:
         run: npm audit --audit-level=high
       - name: Type-check
         run: npm run type-check --if-present
+      # `npm test` runs `sui move test`, so the verify job needs the Sui CLI (same pinned
+      # version as move-ci.yml).
+      - name: Install suiup
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/MystenLabs/suiup/main/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install Sui CLI (testnet channel)
+        run: |
+          suiup install sui@testnet-v1.80.0
+          suiup switch sui@testnet-v1.80.0
+      - name: Verify Sui version
+        run: sui --version
       - name: Unit tests
         run: npm run test --if-present
       - name: Build
