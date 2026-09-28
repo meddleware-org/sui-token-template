@@ -610,4 +610,4 @@ Only if a downstream package needs to know about the new coin type. Reference th
 
 ## License
 
-This guide is CC0 (public domain). Adapt and share freely.
+This guide is licensed under the BSD Zero Clause License (0BSD). Adapt and share freely.

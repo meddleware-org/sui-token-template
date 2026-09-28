@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: CC0-1.0
-// This work is dedicated to the public domain under CC0.
+// SPDX-License-Identifier: 0BSD
+// Licensed under the 0BSD license; see the LICENSE file.
 
 /// XPACKAGEDESCRIPTIONX
 ///

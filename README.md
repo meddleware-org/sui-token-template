@@ -699,4 +699,6 @@ Each instance is independent, immutable, and deployed once.
 
 ## License
 
-This template is CC0 (public domain). Use it freely in your own projects.
+This template is licensed under the BSD Zero Clause License (0BSD) — see [LICENSE](LICENSE). Use it
+freely in your own projects; generated coin packages default to 0BSD too (any SPDX licence, or
+proprietary, can be chosen at generation time).

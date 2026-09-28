@@ -59,4 +59,4 @@ Four tests verify:
 
 ## License
 
-CC0 1.0 Universal — public domain.
+BSD Zero Clause License (0BSD) — see the LICENSE file.

@@ -19,11 +19,11 @@ set -euo pipefail
 #   TOKEN_ICON_URL="https://blob-url" \
 #   bash scripts/03_create_token.sh --output-dir my_token
 #
-# Optional license controls (default: CC0-1.0, preserving historical behaviour):
-#   TOKEN_LICENSE           SPDX identifier (e.g. "MIT", "Apache-2.0", "CC0-1.0")
+# Optional license controls (default: 0BSD):
+#   TOKEN_LICENSE           SPDX identifier (e.g. "0BSD", "MIT", "Apache-2.0", "CC0-1.0")
 #                           or "NONE" for a proprietary / all-rights-reserved package.
 #   TOKEN_LICENSE_TEXT_FILE Path to the full license text to embed as the package
-#                           LICENSE file. If omitted for a non-CC0 license, the text
+#                           LICENSE file. If omitted for a non-0BSD license, the text
 #                           is fetched from the SPDX license-list-data archive.
 #   TOKEN_LICENSE_NAME      Human-readable name shown in the generated README
 #                           License section (defaults to the SPDX identifier).
@@ -80,10 +80,11 @@ fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # License resolution (see the usage block above for the env vars involved).
-# The default is CC0-1.0, which uses the bundled LICENSE text and therefore keeps
-# the default generation path fully offline and byte-identical to prior output.
+# The default is 0BSD, which uses the bundled templates/LICENSE-0BSD text (year + copyright holder
+# substituted) and therefore keeps the default generation path fully offline.
 # ─────────────────────────────────────────────────────────────────────────────
-TOKEN_LICENSE="${TOKEN_LICENSE:-CC0-1.0}"
+TOKEN_LICENSE="${TOKEN_LICENSE:-0BSD}"
+TOKEN_COPYRIGHT_HOLDER="${TOKEN_COPYRIGHT_HOLDER:-${TOKEN_PROJECT_NAME:-$TOKEN_NAME}}"
 TOKEN_LICENSE_TEXT_FILE="${TOKEN_LICENSE_TEXT_FILE:-}"
 TOKEN_LICENSE_NAME="${TOKEN_LICENSE_NAME:-$TOKEN_LICENSE}"
 
@@ -127,7 +128,7 @@ sed -i "s|XMODULENAMEX|$TOKEN_MODULE_NAME|g" "$OUTPUT_DIR/scripts/publish.sh"
 sed -i "s|XPACKAGENAMEX|$TOKEN_PACKAGE_NAME|g" "$OUTPUT_DIR/scripts/publish.sh"
 
 # Validate template files for LICENSE, .gitignore, and README template
-TEMPLATE_LICENSE="$TEMPLATE_DIR/LICENSE"
+TEMPLATE_LICENSE="$TEMPLATE_DIR/templates/LICENSE-0BSD"
 if [[ ! -f "$TEMPLATE_LICENSE" ]]; then
     echo "ERROR: Template LICENSE not found at $TEMPLATE_LICENSE" >&2
     exit 1
@@ -176,9 +177,10 @@ elif [[ -n "$TOKEN_LICENSE_TEXT_FILE" ]]; then
         rm -rf "$OUTPUT_DIR"; exit 1
     fi
     cp "$TOKEN_LICENSE_TEXT_FILE" "$OUTPUT_DIR/LICENSE"
-elif [[ "$SPDX_ID" == "CC0-1.0" ]]; then
-    # Offline default: bundled CC0 text (byte-identical to prior behaviour).
-    cp "$TEMPLATE_LICENSE" "$OUTPUT_DIR/LICENSE"
+elif [[ "$SPDX_ID" == "0BSD" ]]; then
+    # Offline default: bundled 0BSD text with the year and copyright holder filled in.
+    sed -e "s|XYEARX|$(date -u +%Y)|" -e "s|XCOPYRIGHTX|${TOKEN_COPYRIGHT_HOLDER}|" \
+        "$TEMPLATE_LICENSE" > "$OUTPUT_DIR/LICENSE"
 else
     # Fetch the canonical text from the SPDX license-list-data archive.
     LICENSE_URL="https://raw.githubusercontent.com/spdx/license-list-data/main/text/${SPDX_ID}.txt"
@@ -200,11 +202,12 @@ sed -i "s|XDESCRIPTIONX|$TOKEN_DESCRIPTION|g" "$OUTPUT_DIR/README.md"
 sed -i "s|XDECIMALSX|$TOKEN_DECIMALS|g" "$OUTPUT_DIR/README.md"
 
 # Substitute the README License section to match the selected license.
-# CC0 retains the original public-domain wording for byte-identical default output.
+# The template's licence line is matched whatever licence the template itself ships with.
+LICENSE_LINE_RE='^\(CC0 1\.0 Universal\|BSD Zero Clause License\).*'
 if [[ "$LICENSE_PROPRIETARY" == "1" ]]; then
-    sed -i "s|^CC0 1\.0 Universal.*|All rights reserved. This package is proprietary and not licensed for redistribution.|" "$OUTPUT_DIR/README.md"
-elif [[ "$SPDX_ID" != "CC0-1.0" ]]; then
-    sed -i "s|^CC0 1\.0 Universal.*|${TOKEN_LICENSE_NAME} — see the LICENSE file.|" "$OUTPUT_DIR/README.md"
+    sed -i "s#${LICENSE_LINE_RE}#All rights reserved. This package is proprietary and not licensed for redistribution.#" "$OUTPUT_DIR/README.md"
+else
+    sed -i "s#${LICENSE_LINE_RE}#${TOKEN_LICENSE_NAME} — see the LICENSE file.#" "$OUTPUT_DIR/README.md"
 fi
 
 # Copy and substitute deployments.md template
@@ -237,14 +240,14 @@ sed -i "s|XPROJECTNAMEX|$TOKEN_PROJECT_NAME|g" "$OUTPUT_DIR/AGENTS.md"
 # Start with the template
 cp "$TEMPLATE_MOVE" "$OUTPUT_DIR/sources/sui_token_template.move"
 
-# License header substitution (lines 1-2 of the template source). CC0 keeps the
-# original public-domain dedication; other licenses adjust the SPDX tag + comment.
+# License header substitution (lines 1-2 of the template source) — always rewritten, whatever
+# licence the template itself carries.
 if [[ "$LICENSE_PROPRIETARY" == "1" ]]; then
     sed -i '1s|^// SPDX-License-Identifier:.*|// SPDX-License-Identifier: UNLICENSED|' "$OUTPUT_DIR/sources/sui_token_template.move"
-    sed -i '2s|^// This work is dedicated.*|// All rights reserved. Proprietary and not licensed for redistribution.|' "$OUTPUT_DIR/sources/sui_token_template.move"
-elif [[ "$SPDX_ID" != "CC0-1.0" ]]; then
+    sed -i '2s|^//.*|// All rights reserved. Proprietary and not licensed for redistribution.|' "$OUTPUT_DIR/sources/sui_token_template.move"
+else
     sed -i "1s|^// SPDX-License-Identifier:.*|// SPDX-License-Identifier: $SPDX_ID|" "$OUTPUT_DIR/sources/sui_token_template.move"
-    sed -i "2s|^// This work is dedicated.*|// Licensed under the $SPDX_ID license; see the LICENSE file.|" "$OUTPUT_DIR/sources/sui_token_template.move"
+    sed -i "2s|^//.*|// Licensed under the $SPDX_ID license; see the LICENSE file.|" "$OUTPUT_DIR/sources/sui_token_template.move"
 fi
 
 # Module path substitution (must be done as a pair to avoid partial replacements)
