@@ -168,16 +168,15 @@ my_token/         # Example: a generated concrete instance
 - Uses `jq` recursive descent for balance parsing (works across Sui CLI versions).
 - Checks active Sui environment vs NETWORK and warns if mismatch.
 
-### `scripts/publish.sh` — Simple Build + Publish
+### `templates/publish.sh` — per-instance publish (copied to `scripts/publish.sh` in each generated package)
 
 **Purpose:** Publish an already-generated coin instance without re-running the full pipeline.
 
-**Use case:**
-
-- Deploying a committed coin package to a different network.
-- Manual iteration during development (edit, build, publish directly).
-
-**Behavior:** Runs `sui move build` then `sui client publish --gas-budget 50000000`. No generation, no Walrus, no UpgradeCap burn (assumes already burned by deploy_token.sh on first deployment).
+**Behavior:** Requires the active Sui env to equal the target network (never switches it). Publishes
+(test-publish on localnet), then `coin_registry::finalize_registration`, then `set_icon_url` from
+`<STRUCT>_ICON_URL`, then — only with `--confirm-immutable` or an interactive `CONFIRM` — burns the
+UpgradeCap and verifies it was consumed. IDs are saved to `.env.<network>` after each step, so a
+re-run resumes rather than republishing. Unknown arguments are rejected.
 
 ---
 

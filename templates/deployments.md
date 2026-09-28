@@ -41,7 +41,7 @@
 ## Notes
 
 - `TreasuryCap` and `MetadataCap` are both transferred to the **deployer** address at publish time (`init()`'s `ctx.sender()`), not directly to governance. Transfer them to their intended custodians according to your deployment runbook.
-- `UpgradeCap` is burned via `0x2::package::make_immutable` when `scripts/publish.sh` is run with `--confirm-immutable` (interactive CONFIRM prompt otherwise). This is irreversible — confirm the deployment is final before accepting. Verify immutability with `sui client object <PACKAGE_ID> --json | jq -r .data.owner` → `"Immutable"`.
+- `UpgradeCap` is burned via `0x2::package::make_immutable` when `scripts/publish.sh` is run with `--confirm-immutable` (interactive CONFIRM prompt otherwise). This is irreversible — confirm the deployment is final before accepting. Verify immutability by confirming the UpgradeCap no longer exists (`sui client object <UPGRADE_CAP_ID>` fails); the package's own owner field is always `Immutable` and proves nothing.
 - Blob Object ID (not Blob ID) is required for lifetime extension.
 
 ## Blob lifetime monitoring

@@ -337,11 +337,12 @@ fun init(witness: SUI_TOKEN_TEMPLATE, ctx: &mut TxContext) {
 
 #### 1. Immutable Metadata by Design
 
-After `init()` completes, the `MetadataCap` is deleted. **No one can ever change the token's name, symbol, decimals, or icon URL on-chain.** This is intentional:
-
-- The token is a trust anchor for the project that uses it.
-- Upgradable metadata creates governance overhead and audit risk.
-- Off-chain systems (UI, data aggregators) manage icon/metadata display.
+`init()` registers the coin with `coin_registry::new_currency_with_otw` and transfers **both** the
+`TreasuryCap` and the `MetadataCap` to the publisher. **Name, symbol and decimals are fixed forever**
+by the coin registry. **Description and icon URL remain editable by whoever holds the
+`MetadataCap`** until that cap is deleted (`coin_registry::delete_metadata_cap`) or frozen. Decide
+the `MetadataCap` custody explicitly at deployment (keep for icon updates, move to governance, or
+lock) — see the audit's capability matrix.
 
 #### 2. One-Time Witness Pattern
 
@@ -620,9 +621,11 @@ The returned object ID is needed for lifetime monitoring. Update your deployment
 
 ### Can I Update Token Metadata After Deployment?
 
-**No.** The `MetadataCap` is deleted during `init()`, making all metadata immutable on-chain. This is intentional and cannot be changed.
+**Partly.** Name, symbol and decimals are permanently fixed by the coin registry. Description and
+icon URL can be changed by the holder of the `MetadataCap` (e.g. `coin_registry::set_icon_url`) —
+unless it has been deleted or frozen, after which all metadata is immutable.
 
-**If you need to update metadata (name, symbol, decimals, icon):**
+**If you need to change name, symbol or decimals (or metadata after the `MetadataCap` is gone):**
 
 1. Deploy a new token package (new package ID).
 2. Migrate downstream packages to use the new token type.
@@ -649,7 +652,9 @@ walrus blob-status --blob-id <blob-id> --context mainnet
 
 ### Package Immutability (UpgradeCap)
 
-The token package's UpgradeCap is **burned during initial deployment** (see `scripts/publish.sh`). This ensures:
+The token package's UpgradeCap is **burned during deployment** — always by `scripts/deploy_token.sh`
+(phase 6b), and by a generated package's `scripts/publish.sh` when run with `--confirm-immutable` or
+when its interactive CONFIRM prompt is accepted. Once burned:
 
 - No one can upgrade the token package.
 - The package code is permanently frozen.

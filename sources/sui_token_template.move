@@ -18,9 +18,10 @@
 /// ## Deployment
 ///
 /// `init()` is a two-step OTW flow:
-/// 1. `coin_registry::new_currency_with_otw` builds the `Currency<SUI_TOKEN_TEMPLATE>` with an
-///    empty icon URL (network-specific values are set post-publish, not hardcoded
-///    here — see below) and mints `TreasuryCap<SUI_TOKEN_TEMPLATE>`.
+/// 1. `coin_registry::new_currency_with_otw` builds the `Currency<SUI_TOKEN_TEMPLATE>` from the
+///    constants below (the icon URL is the `ICON_URL` constant, which a deployer patches and
+///    `scripts/publish.sh` may replace per network — see below) and mints
+///    `TreasuryCap<SUI_TOKEN_TEMPLATE>`.
 /// 2. `.finalize(ctx)` claims a live `MetadataCap<SUI_TOKEN_TEMPLATE>` (NOT
 ///    `finalize_and_delete_metadata_cap`, which would permanently lock metadata)
 ///    and transfers the pending `Currency<SUI_TOKEN_TEMPLATE>` to the registry address `0xc`.
@@ -35,10 +36,10 @@
 ///   between testnet and mainnet without ever hardcoding a URL in this source file.
 ///
 /// Both caps should be transferred to their intended custodians (e.g. treasury,
-/// governance multisig) according to your deployment runbook. The package itself is
-/// published with immutability constraints (UpgradeCap burned) to prevent future
-/// code modifications; this is independent of metadata mutability, which remains
-/// governance-controlled via the `MetadataCap`.
+/// governance multisig) according to your deployment runbook. Package immutability is a
+/// separate, explicit step: the UpgradeCap is burned by `deploy_token.sh`, or by
+/// `scripts/publish.sh` only with `--confirm-immutable` / an interactive CONFIRM. It is
+/// independent of metadata mutability, which stays with whoever holds the `MetadataCap`.
 module sui_token_template::sui_token_template;
 
 use sui::coin::TreasuryCap;

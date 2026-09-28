@@ -6,7 +6,7 @@ The deployed XSYMBOLX coin type for XPROJECTNAMEX (Sui testnet/mainnet).
 
 Coin type: `<PACKAGE_ID>::XMODULENAMEX::XSTRUCTNAMEX`
 
-Generated from `sui-token-template`. Becomes immutable once `scripts/publish.sh` is run with `--confirm-immutable` (or the interactive CONFIRM prompt is accepted) — this burns the UpgradeCap via `0x2::package::make_immutable`. Verify with `sui client object <PACKAGE_ID> --json | jq -r .data.owner` → expect `"Immutable"`.
+Generated from `sui-token-template`. Becomes immutable once `scripts/publish.sh` is run with `--confirm-immutable` (or the interactive CONFIRM prompt is accepted) — this burns the UpgradeCap via `0x2::package::make_immutable`. Verify by confirming the UpgradeCap is gone: `sui client object <UPGRADE_CAP_ID>` must fail (object deleted) — a package object is always `Immutable`-owned, so its owner field proves nothing.
 
 ## Coin Registry Pattern
 
@@ -14,8 +14,8 @@ This coin uses `coin_registry::new_currency_with_otw` + `.finalize(ctx)` (the
 framework's documented replacement for deprecated `coin::create_currency`) to
 produce a `Currency<XSTRUCTNAMEX>` registry entry. Because OTW currencies require a
 mandatory second transaction (`coin_registry::finalize_registration`) to become
-shared and RPC-discoverable, `suix_getCoinMetadata` only returns non-null data
-*after* that step has run — `scripts/publish.sh` performs it automatically.
+shared and discoverable, wallets and the gRPC/GraphQL coin-metadata APIs only resolve
+it *after* that step has run — `scripts/publish.sh` performs it automatically.
 Metadata fields:
 
 - **Immutable**: Name, symbol, decimals

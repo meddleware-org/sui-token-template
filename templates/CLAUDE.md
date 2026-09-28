@@ -5,7 +5,8 @@
 > This package uses `coin_registry::new_currency_with_otw` + `builder.finalize(ctx)`.
 > `TreasuryCap` and `MetadataCap` are both transferred to the deployer at publish time.
 > Run `coin_registry::finalize_registration` immediately after publish to promote the
-> pending `Currency` to a real shared object (required for `suix_getCoinMetadata` to work).
+> pending `Currency` to a real shared object (required for wallets and the gRPC/GraphQL
+> coin-metadata APIs to resolve it). `scripts/publish.sh` does this automatically.
 
 ## What This Package Is
 
@@ -31,22 +32,22 @@ immediately post-publish by `scripts/publish.sh` (see below), never hardcoded in
 | Aspect | Behavior |
 | --- | --- |
 | `Currency<XSTRUCTNAMEX>` registry object | Yes — created pending, promoted to shared via `coin_registry::finalize_registration` |
-| `suix_getCoinMetadata` | Should return non-null data once `finalize_registration` has run — verify post-redeploy |
+| Coin metadata (gRPC `getCoinMetadata`) | Returns the registry `Currency` once `finalize_registration` has run |
 | **Immutable fields** | Name, symbol, decimals |
 | **Mutable fields** | Description, icon URL |
 
 ## Verification
 
 ```bash
-# Package on-chain; check immutability via owner field
-sui client object FILL_IN_AFTER_DEPLOY --json | jq -r '.data.owner'
-# → "Immutable" once make_immutable has been confirmed during publish
+# Package immutability: the UpgradeCap must no longer exist (a package object is always
+# "Immutable"-owned, so its owner field proves nothing).
+sui client object <UPGRADE_CAP_ID> --json   # → error "object deleted / not found" once burned
 
 # TreasuryCap at governance address
 sui client objects FILL_IN_AFTER_DEPLOY | grep -i treasurycap
 
-# Currency<XSTRUCTNAMEX> is discoverable (post finalize_registration)
-suix_getCoinMetadata "<PACKAGE_ID>::XMODULENAMEX::XSTRUCTNAMEX"
+# Currency<XSTRUCTNAMEX> is discoverable (post finalize_registration): shared object
+sui client object <CURRENCY_OBJECT_ID> --json | jq '.owner'   # → { "Shared": … }
 ```
 
 ## Deployment Artefacts

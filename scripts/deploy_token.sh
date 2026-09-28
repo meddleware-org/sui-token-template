@@ -178,10 +178,53 @@ if [[ -z "$UPGRADE_CAP_ID" || "$UPGRADE_CAP_ID" == "null" ]]; then
     exit 1
 fi
 
+COIN_TYPE="${PACKAGE_ID}::${TOKEN_MODULE_NAME}::${TOKEN_STRUCT_NAME}"
+METADATA_CAP_ID=$(echo "$PUBLISH_OUTPUT" | jq -r --arg t "::coin_registry::MetadataCap<${COIN_TYPE}>" \
+    '[.objectChanges[] | select(.type == "created" and (.objectType | endswith($t))) | .objectId] | .[0] // empty')
+PENDING_CURRENCY_ID=$(echo "$PUBLISH_OUTPUT" | jq -r --arg t "::coin_registry::Currency<${COIN_TYPE}>" \
+    '[.objectChanges[] | select(.type == "created" and (.objectType | endswith($t))) | .objectId] | .[0] // empty')
+
+if [[ -z "$METADATA_CAP_ID" || -z "$PENDING_CURRENCY_ID" ]]; then
+    echo "ERROR: Could not parse MetadataCap / pending Currency object IDs from publish output" >&2
+    exit 1
+fi
+
 echo ""
-echo "  Package ID:      $PACKAGE_ID"
-echo "  TreasuryCap ID:  $TREASURY_CAP_ID"
-echo "  UpgradeCap ID:   $UPGRADE_CAP_ID"
+echo "  Package ID:        $PACKAGE_ID"
+echo "  TreasuryCap ID:    $TREASURY_CAP_ID"
+echo "  MetadataCap ID:    $METADATA_CAP_ID"
+echo "  Pending Currency:  $PENDING_CURRENCY_ID"
+echo "  UpgradeCap ID:     $UPGRADE_CAP_ID"
+echo ""
+
+# ============================================================================
+# Phase 6a: Finalize coin registration
+# ============================================================================
+# coin_registry OTW currencies are created PENDING (owned by the registry address 0xc).
+# finalize_registration promotes them to the shared, wallet-discoverable Currency<T>;
+# without it, wallets and explorers cannot resolve the coin's metadata.
+
+echo "=== Phase 6a: Finalize coin registration ==="
+echo ""
+
+if ! FINALIZE_OUTPUT=$(sui client call \
+    --package 0x2 \
+    --module coin_registry \
+    --function finalize_registration \
+    --type-args "$COIN_TYPE" \
+    --args 0xc "$PENDING_CURRENCY_ID" \
+    --gas-budget 100000000 \
+    --json); then
+    echo "ERROR: finalize_registration FAILED." >&2
+    echo "Package was published but its Currency is NOT yet discoverable." >&2
+    echo "Manual recovery (anyone may run this):" >&2
+    echo "  sui client call --package 0x2 --module coin_registry --function finalize_registration \\" >&2
+    echo "    --type-args $COIN_TYPE --args 0xc $PENDING_CURRENCY_ID --gas-budget 100000000" >&2
+    exit 1
+fi
+CURRENCY_ID=$(echo "$FINALIZE_OUTPUT" | jq -r --arg t "::coin_registry::Currency<${COIN_TYPE}>" \
+    '[.objectChanges[] | select(.type == "created" and (.objectType | endswith($t))) | .objectId] | .[0] // empty')
+echo "Currency registered (shared): ${CURRENCY_ID:-<see transaction>}"
 echo ""
 
 # ============================================================================
@@ -243,7 +286,9 @@ Deployment complete!
 
 Network:            $NETWORK
 Package ID:         $PACKAGE_ID
-TreasuryCap ID:     $TREASURY_CAP_ID
+TreasuryCap ID:     $TREASURY_CAP_ID (transferred to $TREASURY_ADDRESS)
+MetadataCap ID:     $METADATA_CAP_ID (retained by the deployer — can change description/icon)
+Currency ID:        ${CURRENCY_ID:-<see finalize transaction>} (shared, registry-discoverable)
 UpgradeCap ID:      $UPGRADE_CAP_ID (burned — package is immutable)
 Blob ID:            $BLOB_ID
 Blob object ID:     $BLOB_OBJECT_ID

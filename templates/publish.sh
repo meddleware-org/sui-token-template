@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
+# Publish the XPACKAGENAMEX coin package and finish its registration.
+#
+# Usage:
+#   bash scripts/publish.sh [<network>] [--confirm-immutable] [--output-env]
+#
+#   <network>            Sui CLI environment alias (default: testnet). The ACTIVE env must match —
+#                        the script never switches environments for you.
+#   --confirm-immutable  Burn the UpgradeCap without prompting (IRREVERSIBLE).
+#   --output-env         Also print the resulting IDs as KEY=VALUE lines on stdout.
+#
+# Steps (each is resumable — IDs are saved to .env.<network> as soon as they exist, so a re-run
+# continues where a failed run stopped instead of publishing a second package):
+#   1. publish                       → package, TreasuryCap, MetadataCap, pending Currency, UpgradeCap
+#   2. coin_registry::finalize_registration → shared, wallet-discoverable Currency<SUI_TOKEN_TEMPLATE>
+#   3. coin_registry::set_icon_url   → network-specific icon (needs SUI_TOKEN_TEMPLATE_ICON_URL)
+#   4. package::make_immutable       → only with --confirm-immutable or an interactive CONFIRM;
+#                                      verified by the UpgradeCap no longer existing.
 set -euo pipefail
 
 PKG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -6,7 +23,7 @@ PKG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # ─ Utility functions (inlined; no external common.sh in standalone packages) ─
 
 log() {
-	echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"
+	echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" >&2
 }
 
 require_env() {
@@ -18,26 +35,17 @@ require_env() {
 }
 
 load_env() {
-	local network=$1
-	local env_file="$PKG_DIR/.env.${network}"
-	if [[ ! -f "$env_file" ]]; then
-		mkdir -p "$(dirname "$env_file")"
-		touch "$env_file"
-		log "Created empty .env.${network}"
-	fi
-	if [[ -f "$env_file" ]]; then
-		set +u
-		source "$env_file"
-		set -u
-	fi
+	local env_file="$PKG_DIR/.env.$1"
+	[[ -f "$env_file" ]] || { touch "$env_file"; log "Created empty .env.$1"; }
+	set +u
+	# shellcheck source=/dev/null
+	source "$env_file"
+	set -u
 }
 
 save_env() {
-	local network=$1
-	local key=$2
-	local value=$3
+	local network=$1 key=$2 value=$3
 	local env_file="$PKG_DIR/.env.${network}"
-	mkdir -p "$(dirname "$env_file")"
 	if grep -q "^${key}=" "$env_file" 2>/dev/null; then
 		sed -i.bak "s|^${key}=.*|${key}=${value}|" "$env_file"
 		rm -f "${env_file}.bak"
@@ -48,182 +56,178 @@ save_env() {
 }
 
 get_published_at() {
-	local json=$1
-	echo "$json" | jq -r '.objectChanges[] | select(.type == "published") | .packageId'
+	echo "$1" | jq -r '.objectChanges[] | select(.type == "published") | .packageId'
 }
 
+# get_created_object <json> <type suffix> — the single created object whose type ends with the suffix.
 get_created_object() {
-	local json=$1
-	local struct_substr=$2
-	echo "$json" | jq -r --arg type "$struct_substr" \
-		'.objectChanges[] | select(.type == "created" and (.objectType | contains($type))) | .objectId' | head -1
+	echo "$1" | jq -r --arg t "$2" \
+		'[.objectChanges[] | select(.type == "created" and (.objectType | endswith($t))) | .objectId]
+		 | if length == 1 then .[0] else "" end'
 }
 
+# run_json <cmd…> — run a sui CLI command, return its JSON body; on failure log the output and exit.
+run_json() {
+	local out
+	if ! out=$("$@" 2>&1); then
+		log "ERROR: command failed: $*"
+		log "$out"
+		exit 1
+	fi
+	echo "$out" | awk '/^{/,0'
+}
+
+# True if the object currently exists on-chain (a deleted/consumed object makes the CLI exit non-zero).
 is_object_exists() {
-	local obj_id=$1
-	sui client object "$obj_id" --json 2>/dev/null | jq -e '.data != null' > /dev/null 2>&1
+	sui client object "$1" --json 2>/dev/null | jq -e '.objectId != null' > /dev/null 2>&1
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ─ Arguments ─────────────────────────────────────────────────────────────────
 
-NETWORK=${1:-testnet}
+NETWORK=testnet
 OUTPUT_ENV=false
 CONFIRM_IMMUTABLE=false
-
-while [[ $# -gt 1 ]]; do
+if [[ $# -gt 0 && "$1" != --* ]]; then
+	NETWORK=$1
+	shift
+fi
+while [[ $# -gt 0 ]]; do
 	case "$1" in
-		--output-env) OUTPUT_ENV=true; shift ;;
-		--confirm-immutable) CONFIRM_IMMUTABLE=true; shift ;;
-		*) shift ;;
+		--output-env) OUTPUT_ENV=true ;;
+		--confirm-immutable) CONFIRM_IMMUTABLE=true ;;
+		*) log "ERROR: unknown argument '$1' (expected [<network>] [--confirm-immutable] [--output-env])"; exit 1 ;;
 	esac
+	shift
 done
 
+ACTIVE_ENV="$(sui client active-env 2>/dev/null || true)"
+if [[ "$ACTIVE_ENV" != "$NETWORK" ]]; then
+	log "ERROR: active Sui env is '${ACTIVE_ENV}', but this run targets '${NETWORK}'."
+	log "       Switch first: sui client switch --env ${NETWORK}"
+	exit 1
+fi
+
 load_env "$NETWORK"
+COIN_TYPE_SUFFIX="::XMODULENAMEX::SUI_TOKEN_TEMPLATE"
 
-# Idempotency check
+# ─ 1. Publish ────────────────────────────────────────────────────────────────
+
 if [[ -n "${SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID:-}" ]]; then
-	log "XPACKAGENAMEX package already published: $SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID"
+	log "XPACKAGENAMEX already published: $SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID (resuming)"
+else
+	require_env "SUI_TOKEN_TEMPLATE_ICON_URL"
+	log "Publishing XPACKAGENAMEX package from $PKG_DIR..."
+	if [[ "$NETWORK" == "localnet" ]]; then
+		# Sui >= 1.80 only publishes to environments declared in Move.toml; localnet uses an
+		# ephemeral test-publish (its pubfile is discarded — localnet state is throwaway anyway).
+		PUBLISH_OUTPUT=$(run_json sui client test-publish "$PKG_DIR" --json --build-env testnet \
+			--pubfile-path "${TMPDIR:-/tmp}/pub-localnet-$$-${RANDOM}.toml")
+	else
+		PUBLISH_OUTPUT=$(run_json sui client publish "$PKG_DIR" --json)
+	fi
 
-	# Non-fatal immutability warning if cap still exists
-	if [[ -n "${SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID:-}" ]]; then
-		if is_object_exists "$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID"; then
-			log "WARNING: UpgradeCap $SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID still exists — package is NOT yet immutable"
-			log "To make it immutable, run: bash $0 $NETWORK --confirm-immutable"
-		else
-			log "UpgradeCap confirmed consumed — package is immutable"
+	SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID=$(get_published_at "$PUBLISH_OUTPUT")
+	SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID=$(get_created_object "$PUBLISH_OUTPUT" "::coin::TreasuryCap<${SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID}${COIN_TYPE_SUFFIX}>")
+	SUI_TOKEN_TEMPLATE_METADATA_CAP_ID=$(get_created_object "$PUBLISH_OUTPUT" "::coin_registry::MetadataCap<${SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID}${COIN_TYPE_SUFFIX}>")
+	SUI_TOKEN_TEMPLATE_PENDING_CURRENCY_ID=$(get_created_object "$PUBLISH_OUTPUT" "::coin_registry::Currency<${SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID}${COIN_TYPE_SUFFIX}>")
+	SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID=$(get_created_object "$PUBLISH_OUTPUT" "::package::UpgradeCap")
+
+	for v in SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID SUI_TOKEN_TEMPLATE_METADATA_CAP_ID \
+		SUI_TOKEN_TEMPLATE_PENDING_CURRENCY_ID SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID; do
+		if [[ -z "${!v}" || "${!v}" == "null" ]]; then
+			log "ERROR: could not extract $v from publish output"
+			log "Output: $PUBLISH_OUTPUT"
+			exit 1
 		fi
+	done
+	for v in SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID SUI_TOKEN_TEMPLATE_METADATA_CAP_ID \
+		SUI_TOKEN_TEMPLATE_PENDING_CURRENCY_ID SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID; do
+		save_env "$NETWORK" "$v" "${!v}"
+	done
+	log "Published XPACKAGENAMEX package successfully"
+fi
+COIN_TYPE="${SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID}${COIN_TYPE_SUFFIX}"
+
+# ─ 2. finalize_registration ──────────────────────────────────────────────────
+# OTW currencies need this second step to become a real, shared, RPC-discoverable
+# Currency<SUI_TOKEN_TEMPLATE>. Anyone may perform it; doing it here keeps deploys self-contained.
+
+if [[ -n "${SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID:-}" ]]; then
+	log "Currency already registered: $SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID"
+else
+	require_env "SUI_TOKEN_TEMPLATE_PENDING_CURRENCY_ID"
+	log "Promoting Currency<SUI_TOKEN_TEMPLATE> via coin_registry::finalize_registration..."
+	FINALIZE_REG_OUTPUT=$(run_json sui client call \
+		--package 0x2 \
+		--module coin_registry \
+		--function finalize_registration \
+		--type-args "$COIN_TYPE" \
+		--args 0xc "$SUI_TOKEN_TEMPLATE_PENDING_CURRENCY_ID" \
+		--gas-budget 100000000 \
+		--json)
+	SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID=$(get_created_object "$FINALIZE_REG_OUTPUT" "::coin_registry::Currency<${COIN_TYPE}>")
+	if [[ -z "$SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID" ]]; then
+		log "ERROR: could not extract the shared Currency<SUI_TOKEN_TEMPLATE> ID from finalize_registration output"
+		log "Output: $FINALIZE_REG_OUTPUT"
+		exit 1
 	fi
-
-	if [[ "$OUTPUT_ENV" == "true" ]]; then
-		echo "SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID=$SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID"
-		echo "SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID=$SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID"
-		echo "SUI_TOKEN_TEMPLATE_METADATA_CAP_ID=$SUI_TOKEN_TEMPLATE_METADATA_CAP_ID"
-		echo "SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID=$SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID"
-	fi
-	exit 0
+	save_env "$NETWORK" "SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID" "$SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID"
 fi
 
-require_env "SUI_TOKEN_TEMPLATE_ICON_URL"
+# ─ 3. Network-specific icon URL (while the sender still holds MetadataCap) ──
 
-log "Publishing XPACKAGENAMEX package from $PKG_DIR..."
-
-PUBLISH_OUTPUT=$(sui client publish "$PKG_DIR" --json 2>&1)
-
-SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID=$(get_published_at "$PUBLISH_OUTPUT")
-SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID=$(get_created_object "$PUBLISH_OUTPUT" "TreasuryCap")
-SUI_TOKEN_TEMPLATE_METADATA_CAP_ID=$(get_created_object "$PUBLISH_OUTPUT" "MetadataCap")
-PENDING_CURRENCY_ID=$(get_created_object "$PUBLISH_OUTPUT" "Currency")
-SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID=$(get_created_object "$PUBLISH_OUTPUT" "UpgradeCap")
-
-if [[ -z "$SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID" ]] || [[ -z "$SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID" ]] || [[ -z "$SUI_TOKEN_TEMPLATE_METADATA_CAP_ID" ]] || [[ -z "$PENDING_CURRENCY_ID" ]] || [[ -z "$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID" ]]; then
-	log "ERROR: Failed to extract object IDs from publish output"
-	log "Output: $PUBLISH_OUTPUT"
-	exit 1
+if [[ "${SUI_TOKEN_TEMPLATE_ICON_URL_SET:-}" == "${SUI_TOKEN_TEMPLATE_ICON_URL:-}" && -n "${SUI_TOKEN_TEMPLATE_ICON_URL:-}" ]]; then
+	log "Icon URL already set: $SUI_TOKEN_TEMPLATE_ICON_URL"
+else
+	require_env "SUI_TOKEN_TEMPLATE_ICON_URL"
+	log "Setting icon URL via coin_registry::set_icon_url..."
+	run_json sui client call \
+		--package 0x2 \
+		--module coin_registry \
+		--function set_icon_url \
+		--type-args "$COIN_TYPE" \
+		--args "$SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID" "$SUI_TOKEN_TEMPLATE_METADATA_CAP_ID" "$SUI_TOKEN_TEMPLATE_ICON_URL" \
+		--gas-budget 100000000 \
+		--json > /dev/null
+	save_env "$NETWORK" "SUI_TOKEN_TEMPLATE_ICON_URL_SET" "$SUI_TOKEN_TEMPLATE_ICON_URL"
 fi
 
-log "Published XPACKAGENAMEX package successfully"
-log "  SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID=$SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID"
-log "  SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID=$SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID"
-log "  SUI_TOKEN_TEMPLATE_METADATA_CAP_ID=$SUI_TOKEN_TEMPLATE_METADATA_CAP_ID"
-log "  PENDING_CURRENCY_ID=$PENDING_CURRENCY_ID (owned by registry address 0xc, pending finalize_registration)"
-log "  SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID=$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID (pending immutability confirmation)"
+# ─ 4. Irreversible: burn the UpgradeCap to make the package immutable ───────
 
-# ─ OTW currencies require a mandatory second step to become a real, shared, ─
-# ─ RPC-discoverable Currency<SUI_TOKEN_TEMPLATE> object. "Can be performed by anyone" ─
-# ─ per the framework docs, but doing it here keeps the deploy pipeline self-contained. ─
-
-log "Promoting Currency<SUI_TOKEN_TEMPLATE> via coin_registry::finalize_registration..."
-
-FINALIZE_REG_OUTPUT=$(sui client call \
-	--package 0x2 \
-	--module coin_registry \
-	--function finalize_registration \
-	--type-args "${SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID}::XMODULENAMEX::SUI_TOKEN_TEMPLATE" \
-	--args 0xc "$PENDING_CURRENCY_ID" \
-	--gas-budget 100000000 \
-	--json 2>&1)
-
-SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID=$(echo "$FINALIZE_REG_OUTPUT" | jq -r '.objectChanges[] | select(.type == "created" and (.objectType | contains("Currency"))) | .objectId' | head -1)
-
-if [[ -z "$SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID" ]]; then
-	log "ERROR: Failed to extract the shared Currency<SUI_TOKEN_TEMPLATE> object ID from finalize_registration output"
-	log "Output: $FINALIZE_REG_OUTPUT"
-	exit 1
-fi
-
-log "  SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID=$SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID (shared Currency<SUI_TOKEN_TEMPLATE>)"
-
-# ─ Set the network-specific icon URL while we still hold MetadataCap as sender ─
-# ─ (this is what makes the icon configurable per network instead of hardcoded) ─
-
-log "Setting icon URL via coin_registry::set_icon_url..."
-
-sui client call \
-	--package 0x2 \
-	--module coin_registry \
-	--function set_icon_url \
-	--type-args "${SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID}::XMODULENAMEX::SUI_TOKEN_TEMPLATE" \
-	--args "$SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID" "$SUI_TOKEN_TEMPLATE_METADATA_CAP_ID" "$SUI_TOKEN_TEMPLATE_ICON_URL" \
-	--gas-budget 100000000 \
-	--json > /dev/null
-
-log "  Icon URL set to: $SUI_TOKEN_TEMPLATE_ICON_URL"
-
-# ─ Irreversible step: burn UpgradeCap to make the package immutable ─
-
-if [[ "$CONFIRM_IMMUTABLE" == "true" ]]; then
+burn_upgrade_cap() {
 	log "Making XPACKAGENAMEX package immutable (this is IRREVERSIBLE)..."
-	sui client call \
+	run_json sui client call \
 		--package 0x2 \
 		--module package \
 		--function make_immutable \
 		--args "$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID" \
 		--gas-budget 100000000 \
 		--json > /dev/null
-
-	# Verify immutability
-	OWNER=$(sui client object "$SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID" --json 2>/dev/null | jq -r '.data.owner')
-	if [[ "$OWNER" != "Immutable" ]]; then
-		log "ERROR: Expected package owner to be Immutable, got: $OWNER"
+	# A package object is always "Immutable"-owned, so the only proof of immutability is that the
+	# UpgradeCap was consumed.
+	if is_object_exists "$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID"; then
+		log "ERROR: UpgradeCap $SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID still exists after make_immutable"
 		exit 1
 	fi
+	log "✓ Package $SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID is now permanently immutable (UpgradeCap consumed)"
+}
 
-	log "✓ Package $SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID is now permanently immutable"
+if [[ -z "${SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID:-}" ]] || ! is_object_exists "$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID"; then
+	log "UpgradeCap already consumed — package is immutable"
+elif [[ "$CONFIRM_IMMUTABLE" == "true" ]]; then
+	burn_upgrade_cap
 else
 	log ""
 	log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	log "UpgradeCap NOT burned — package remains upgradeable."
-	log ""
-	log "To burn the UpgradeCap and make the package permanently immutable,"
-	log "either:"
-	log "  1. Re-run with --confirm-immutable flag:"
-	log "     bash $0 $NETWORK --confirm-immutable"
-	log "  2. Or confirm interactively now:"
-	log ""
+	log "UpgradeCap $SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID NOT burned — the package remains upgradeable."
+	log "Burn it now, or later with: bash $0 $NETWORK --confirm-immutable"
 	read -r -p "Type CONFIRM to burn the UpgradeCap and make the package immutable: " ANSWER
 	if [[ "$ANSWER" == "CONFIRM" ]]; then
-		log "Burning UpgradeCap..."
-		sui client call \
-			--package 0x2 \
-			--module package \
-			--function make_immutable \
-			--args "$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID" \
-			--gas-budget 100000000 \
-			--json > /dev/null
-
-		# Verify immutability
-		OWNER=$(sui client object "$SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID" --json 2>/dev/null | jq -r '.data.owner')
-		if [[ "$OWNER" != "Immutable" ]]; then
-			log "ERROR: Expected package owner to be Immutable, got: $OWNER"
-			exit 1
-		fi
-
-		log "✓ Package $SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID is now permanently immutable"
+		burn_upgrade_cap
 	else
 		log "Skipped immutability step. UpgradeCap $SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID is retained."
 	fi
 	log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	log ""
 fi
 
 if [[ "$OUTPUT_ENV" == "true" ]]; then
@@ -232,10 +236,4 @@ if [[ "$OUTPUT_ENV" == "true" ]]; then
 	echo "SUI_TOKEN_TEMPLATE_METADATA_CAP_ID=$SUI_TOKEN_TEMPLATE_METADATA_CAP_ID"
 	echo "SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID=$SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID"
 	echo "SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID=$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID"
-else
-	save_env "$NETWORK" "SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID" "$SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID"
-	save_env "$NETWORK" "SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID" "$SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID"
-	save_env "$NETWORK" "SUI_TOKEN_TEMPLATE_METADATA_CAP_ID" "$SUI_TOKEN_TEMPLATE_METADATA_CAP_ID"
-	save_env "$NETWORK" "SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID" "$SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID"
-	save_env "$NETWORK" "SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID" "$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID"
 fi

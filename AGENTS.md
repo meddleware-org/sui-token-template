@@ -54,7 +54,7 @@ This package is a **generic Sui coin template and deployment system** for genera
 | `sources/sui_token_template.move` | Template source; uses buildable placeholder values | Keep minimal. Changes affect all future generated instances. Tests are inline. |
 | `scripts/03_create_token.sh` | Generator: template → concrete instance | Idempotent. Safe to run multiple times (overwrites). Validates substitutions. |
 | `scripts/deploy_token.sh` | Full pipeline: Walrus → generate → build → publish → transfer | Error recovery instructions included. Print recovery commands if phases 7–8 fail post-publish. |
-| `scripts/publish.sh` | Simple build + publish for existing instances | Copied to all generated instances. No regeneration logic. |
+| `templates/publish.sh` | Per-instance publish → finalize_registration → icon → optional UpgradeCap burn | Copied to every generated instance as `scripts/publish.sh`; resumable; verifies immutability by the UpgradeCap being consumed. |
 | `Move.toml` | Package manifest (template version) | Minimal; copy during generation with package name substitution. |
 | `README.md` | User-facing feature overview | Keep synchronized with actual script behavior. |
 | `IMPLEMENTATION_GUIDE.md` | Practical deployment workflows | Workflows and checklists. Update if env vars, phases, or steps change. |
