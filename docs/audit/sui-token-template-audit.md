@@ -193,6 +193,17 @@ imported, no dead links, lint/type-check green).
 `package-lock.json` → `npm run build` and confirm the `[gen:onchain]` log shows imported pages
 (no placeholder) → release the site images.
 
+### F13 — Licence: CC0-1.0 replaced by 0BSD
+**Severity:** Info   **Disposition:** RESOLVED (owner decision: CC0 usages become 0BSD) — commit
+`46862f0`. `LICENSE`, `Move.toml`, `package.json`, the source SPDX header, README and
+IMPLEMENTATION_GUIDE are 0BSD. `scripts/03_create_token.sh` defaults `TOKEN_LICENSE=0BSD`, renders
+`templates/LICENSE-0BSD` with the year and `TOKEN_COPYRIGHT_HOLDER` (default: project or token
+name), and always rewrites the header for the chosen licence (verified for 0BSD, MIT and NONE; the
+0BSD package builds). `token-deployer-ui` defaults its licence picker to 0BSD (`a2edb8d`); CC0-1.0
+stays selectable there. The Move bytecode is unchanged (comments and manifest only). Its embedded
+`src/template-src/files.json` still carries the CC0 text until the F9 re-sync (generated packages
+already get the chosen licence, because the generator rewrites header and manifest).
+
 ---
 
 ## Section A — Invariant verification matrix
@@ -356,3 +367,6 @@ N/A — no consume/grant flows and no events defined by the template (framework 
 
 - 2026-09-28 — first-pass baseline under AUDIT_TEMPLATE.md + AUDIT_TEMPLATE_SUI.md. F1–F5 RESOLVED in
   `bf24534` (generated `publish.sh` verified on localnet); F6–F9 recorded.
+- 2026-09-28 (second pass) — F13 (licence → 0BSD) RESOLVED in `46862f0`; re-sync of
+  `token-deployer-ui`'s `files.json` against this checkout verified locally (111 tests +
+  `verify:template` green with `SUI_TOKEN_TEMPLATE_DIR`), deferred with F9 until the next npm release.
