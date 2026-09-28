@@ -32,7 +32,8 @@
     "README.md",
     "CLAUDE.md",
     "AGENTS.md",
-    "LICENSE"
+    "LICENSE",
+    "SECURITY.md"
   ],
   "engines": {
     "node": "^22.18.0 || >=24.12.0"

@@ -26,8 +26,9 @@ transfer::public_transfer(treasury_cap, ctx.sender());
 transfer::public_transfer(metadata_cap, ctx.sender());
 ```
 
-`init()` builds with an empty icon URL — the real, network-specific value is set
-immediately post-publish by `scripts/publish.sh` (see below), never hardcoded in source.
+`init()` registers the icon URL from the `ICON_URL` constant chosen at generation time;
+`scripts/publish.sh` then sets the network-specific value from `XSTRUCTNAMEX_ICON_URL` via
+`coin_registry::set_icon_url` (while the deployer still holds the `MetadataCap`).
 
 | Aspect | Behavior |
 | --- | --- |
