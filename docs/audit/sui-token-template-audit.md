@@ -101,7 +101,7 @@ Critical / High / Medium / Low / Info / Positive.
 - (g) Unknown flags were accepted, and the active env was never checked.
 **Impact:** a deployer could believe a token package was immutable when it was not, or lose the IDs of
 freshly minted `TreasuryCap` / `MetadataCap`.
-**Remediation / evidence:** commit `bf24534`. The rewrite:
+**Remediation / evidence:** commit `6ea9bb0`. The rewrite:
 - parses arguments strictly and fails closed when the active env differs from `NETWORK`;
 - runs each step resumably, saving IDs as soon as they exist;
 - matches types exactly (`endswith`);
@@ -116,7 +116,7 @@ re-run (resumed, no second publish), and both refusal cases.
 **Where:** `scripts/deploy_token.sh` phase 6 → 6b.
 **Impact:** CLI-deployed coins stayed pending at `0xc`; wallets and explorers could not resolve their
 metadata.
-**Remediation / evidence:** commit `bf24534` — phase 6a calls `coin_registry::finalize_registration`
+**Remediation / evidence:** commit `6ea9bb0` — phase 6a calls `coin_registry::finalize_registration`
 with type-exact extraction of the pending `Currency<T>`, with manual-recovery instructions; the
 summary now reports the `MetadataCap` and `Currency` IDs. Not run live (the pipeline needs a Walrus
 upload); the call and extraction are identical to the localnet-verified `publish.sh` step.
@@ -130,16 +130,16 @@ upload); the call and extraction are identical to the localnet-verified `publish
 - The generated `CLAUDE.md` / `AGENTS.md` / `deployments.md` verified immutability with `.data.owner`.
 - The docs recommended deprecated JSON-RPC `suix_getCoinMetadata`.
 - The implementation guide claimed metadata lookups return null by design.
-**Evidence:** commit `bf24534` (plus the `templates/CLAUDE.md` icon-URL correction in the docs
+**Evidence:** commit `6ea9bb0` (plus the `templates/CLAUDE.md` icon-URL correction in the docs
 commit). Verification is now "UpgradeCap no longer exists" and gRPC `getCoinMetadata`, which was
 checked on localnet to return the registry `Currency`.
 
 ### F4 — No `SECURITY.md`
-**Severity:** Low   **Disposition:** RESOLVED — commit `bf24534` (S8); `package.json` `files`
+**Severity:** Low   **Disposition:** RESOLVED — commit `6ea9bb0` (S8); `package.json` `files`
 now ships it.
 
 ### F5 — Source doc comments inaccurate
-**Severity:** Info   **Disposition:** RESOLVED — commit `bf24534`. The comments claimed `init` uses
+**Severity:** Info   **Disposition:** RESOLVED — commit `6ea9bb0`. The comments claimed `init` uses
 an empty icon URL (it uses the `ICON_URL` constant) and that the UpgradeCap is always burned. The
 bytecode is unchanged: only comments were edited.
 
@@ -195,11 +195,11 @@ imported, no dead links, lint/type-check green).
 
 ### F13 — Licence: CC0-1.0 replaced by 0BSD
 **Severity:** Info   **Disposition:** RESOLVED (owner decision: CC0 usages become 0BSD) — commit
-`46862f0`. `LICENSE`, `Move.toml`, `package.json`, the source SPDX header, README and
+`506c89a`. `LICENSE`, `Move.toml`, `package.json`, the source SPDX header, README and
 IMPLEMENTATION_GUIDE are 0BSD. `scripts/03_create_token.sh` defaults `TOKEN_LICENSE=0BSD`, renders
 `templates/LICENSE-0BSD` with the year and `TOKEN_COPYRIGHT_HOLDER` (default: project or token
 name), and always rewrites the header for the chosen licence (verified for 0BSD, MIT and NONE; the
-0BSD package builds). `token-deployer-ui` defaults its licence picker to 0BSD (`a2edb8d`); CC0-1.0
+0BSD package builds). `token-deployer-ui` defaults its licence picker to 0BSD (`0871b74`); CC0-1.0
 stays selectable there. The Move bytecode is unchanged (comments and manifest only). Its embedded
 `src/template-src/files.json` still carries the CC0 text until the F9 re-sync (generated packages
 already get the chosen licence, because the generator rewrites header and manifest).
@@ -366,7 +366,7 @@ N/A — no consume/grant flows and no events defined by the template (framework 
 ## Re-verification log
 
 - 2026-09-28 — first-pass baseline under AUDIT_TEMPLATE.md + AUDIT_TEMPLATE_SUI.md. F1–F5 RESOLVED in
-  `bf24534` (generated `publish.sh` verified on localnet); F6–F9 recorded.
-- 2026-09-28 (second pass) — F13 (licence → 0BSD) RESOLVED in `46862f0`; re-sync of
+  `6ea9bb0` (generated `publish.sh` verified on localnet); F6–F9 recorded.
+- 2026-09-28 (second pass) — F13 (licence → 0BSD) RESOLVED in `506c89a`; re-sync of
   `token-deployer-ui`'s `files.json` against this checkout verified locally (111 tests +
   `verify:template` green with `SUI_TOKEN_TEMPLATE_DIR`), deferred with F9 until the next npm release.
