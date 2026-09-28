@@ -180,6 +180,19 @@ not.
 **Severity:** Positive — distinct values (no constant-pool deduplication); `token-deployer-ui`
 enforces `SAFE_TEXT`, 512-char caps and decimals 0–255 before patching.
 
+### F12 — docs./dev. sites import the canonical on-chain docs only after npm publication
+**Severity:** Info   **Disposition:** DEFERRED (exact remediation below)
+**Where:** `repos/docs` and `repos/dev` — `scripts/gen-onchain.mjs` resolves `@meddleware/sui-token-template` from
+`node_modules`.
+**Issue:** the canonical `docs/onchain/*` pages ship in `@meddleware/sui-token-template` from the next release after 1.0.4 (1.0.4, installed today, predates them; the version bump is the maintainer's call — OQ5). Until
+that version is on npm and installed in both sites, their builds render placeholder pages for this
+package (by design — builds never fail). Verified locally with `ONCHAIN_DOCS_ROOT=..` (all pages
+imported, no dead links, lint/type-check green).
+**Remediation:** publish the next `@meddleware/sui-token-template` release (push the release tag; `npm-publish.yml`), then in both
+`repos/docs` and `repos/dev`: `npm install -D @meddleware/sui-token-template@<next>` → commit `package.json` +
+`package-lock.json` → `npm run build` and confirm the `[gen:onchain]` log shows imported pages
+(no placeholder) → release the site images.
+
 ---
 
 ## Section A — Invariant verification matrix
@@ -275,6 +288,7 @@ N/A — no consume/grant flows and no events defined by the template (framework 
 
 ### pre-testnet
 
+- [ ] docs./dev. sites install the published `@meddleware/sui-token-template` and import its on-chain docs — F12
 - [x] generated `publish.sh` verified on localnet (F1)
 - [ ] `deploy_token.sh` exercised end-to-end on testnet (S1)
 - [ ] token-deployer-ui re-synced to the next template release (F9)
