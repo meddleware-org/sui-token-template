@@ -144,13 +144,13 @@ my_token/         # Example: a generated concrete instance
 
 **Phases:**
 
-1. **Preflight** — Validate env vars, tools, network, image, address formats. Check SUI balance (warning only).
+1. **Preflight** — Validate env vars, tools, network, image, address formats. The active Sui env, the chain identifier and the CLI major.minor (1.80) must match — each a hard failure. Check SUI balance (warning only). Mainnet additionally requires `MAINNET_CONFIRM=1` (a skipped run exits 78).
 2. **Walrus Upload** — Upload image to Walrus (50 epochs testnet, 200 mainnet). Parse blob ID and object ID. Prompt user to verify URL.
 3. **Generate** — Call `03_create_token.sh` with derived icon URL.
 4. **Build & Test** — Run `sui move test` and `sui move build`.
 5. **Confirmation** — Print summary, require user type `CONFIRM`.
 6. **Publish** — Run `sui client publish --gas-budget 100000000`. Parse package ID and TreasuryCap ID.
-7. **Burn UpgradeCap** — Call `sui client call --package 0x2 --module package --function make_immutable` with UpgradeCap ID. Package becomes immutable.
+7. **Burn UpgradeCap** — asks for its own typed `BURN` confirmation (the publish `CONFIRM` does not cover it), then calls `0x2::package::make_immutable`. Declining keeps the UpgradeCap and prints the command to burn it later.
 8. **Transfer TreasuryCap** — Transfer to governance multisig. Includes recovery instructions if transfer fails (print object ID and manual command).
 9. **Summary** — Print all IDs, blob URLs, addresses, and next steps.
 
@@ -166,7 +166,7 @@ my_token/         # Example: a generated concrete instance
 
 - Uses `walrus store --context $NETWORK --json` (tested with walrus 1.49.1).
 - Uses `jq` recursive descent for balance parsing (works across Sui CLI versions).
-- Checks active Sui environment vs NETWORK and warns if mismatch.
+- Refuses to run unless the active Sui environment and chain identifier match NETWORK.
 
 ### `templates/publish.sh` — per-instance publish (copied to `scripts/publish.sh` in each generated package)
 
@@ -314,7 +314,7 @@ If a design choice is ambiguous:
 1. **Prefer immutability.** When in doubt, lock it down.
 2. **Prefer minimal scope.** Keep the coin package simple. All business logic goes downstream.
 3. **Prefer explicit error handling.** Recovery instructions (UpgradeCap burn, TreasuryCap transfer) print exact commands for manual recovery.
-4. **Prefer offline validation.** `deploy_token.sh` requires explicit confirmation (type `CONFIRM`) before publishing.
+4. **Prefer offline validation.** `deploy_token.sh` requires explicit confirmation (type `CONFIRM`) before publishing, and a separate `BURN` before making the package immutable.
 
 ---
 

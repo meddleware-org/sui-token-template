@@ -1,6 +1,11 @@
 # Sui build artefacts
 build/
 
+# Local env files (keep committed examples: .env.example)
+.env
+.env.*
+!.env.example
+
 # Sui client keystore and config — never commit private keys
 sui.keystore
 sui.aliases

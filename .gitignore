@@ -4,6 +4,9 @@ build/
 # Move package lock file
 Move.lock
 
+# Filled-in script env files (copies of scripts/*.env.sh.example) — may hold real addresses
+scripts/*.env.sh
+
 # Sui client keystore and config — never commit private keys
 sui.keystore
 sui.aliases

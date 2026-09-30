@@ -83,13 +83,28 @@ if [[ "$NETWORK" != "testnet" && "$NETWORK" != "mainnet" ]]; then
     exit 1
 fi
 
-# Check active Sui environment matches NETWORK (warning only)
+# The active Sui environment and its chain must be NETWORK (hard failure: a mismatch would
+# publish to the wrong chain).
 ACTIVE_ENV=$(sui client active-env 2>/dev/null || echo "unknown")
 if [[ "$ACTIVE_ENV" != "$NETWORK" ]]; then
-    echo "WARNING: Active Sui environment is '$ACTIVE_ENV' but NETWORK is '$NETWORK'." >&2
-    echo "         Run: sui client switch --env $NETWORK" >&2
-    echo "         Proceeding anyway — ensure this is intentional." >&2
-    echo "" >&2
+    echo "ERROR: Active Sui environment is '$ACTIVE_ENV' but NETWORK is '$NETWORK'." >&2
+    echo "       Run: sui client switch --env $NETWORK" >&2
+    exit 1
+fi
+case "$NETWORK" in testnet) WANT_CHAIN=4c78adac ;; mainnet) WANT_CHAIN=35834a8a ;; esac
+# Note: `sui client chain-identifier` caches the id in client.yaml (harmless).
+CHAIN=$(sui client chain-identifier 2>/dev/null | awk '/^Hex:/{print $2; exit} !/:/{print $1; exit}')
+if [[ "$CHAIN" != "$WANT_CHAIN" ]]; then
+    echo "ERROR: chain identifier is '${CHAIN:-<unreachable>}', expected $WANT_CHAIN for $NETWORK." >&2
+    exit 1
+fi
+# The shipped template bytecode is built with the CLI line pinned in the workspace toolchain table
+# (sui testnet-v1.80.x); another major.minor may emit bytecode the chain or the template tests reject.
+CLI_VER=$(sui --version | awk '{print $2}' | cut -d- -f1)
+if [[ "${CLI_VER%.*}" != "${TEMPLATE_SUI_VERSION:-1.80}" ]]; then
+    echo "ERROR: sui CLI $CLI_VER; this template is built and tested with ${TEMPLATE_SUI_VERSION:-1.80}.x." >&2
+    echo "       Install it with suiup, or set TEMPLATE_SUI_VERSION to override deliberately." >&2
+    exit 1
 fi
 
 # Check image file exists

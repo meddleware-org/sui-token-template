@@ -139,6 +139,10 @@ Please review the deployment configuration:
 
 EOF
 
+if [[ "$NETWORK" == "mainnet" && "${MAINNET_CONFIRM:-}" != "1" ]]; then
+    echo "SKIPPED: mainnet publishes a real token; re-run with MAINNET_CONFIRM=1 to proceed." >&2
+    exit 78
+fi
 read -rp "Type CONFIRM to proceed with on-chain publish: " CONFIRMATION
 if [[ "$CONFIRMATION" != "CONFIRM" ]]; then
     echo "Aborted." >&2
@@ -235,22 +239,27 @@ echo "=== Phase 6b: Burn UpgradeCap ==="
 echo ""
 echo "  UpgradeCap ID: $UPGRADE_CAP_ID"
 echo ""
-
-if ! sui client call \
+# The publish confirmation above does not cover this irreversible step: ask again, specifically.
+read -rp "Type BURN to make the package permanently immutable (anything else keeps the UpgradeCap): " BURN_CONFIRMATION
+if [[ "$BURN_CONFIRMATION" != "BURN" ]]; then
+    echo "UpgradeCap kept — the package stays upgradeable by the deployer. To burn it later:" >&2
+    echo "  sui client call --package 0x2 --module package --function make_immutable \\" >&2
+    echo "    --args $UPGRADE_CAP_ID --gas-budget 10000000" >&2
+elif ! sui client call --json \
     --package 0x2 \
     --module package \
     --function make_immutable \
     --args "$UPGRADE_CAP_ID" \
-    --gas-budget 10000000; then
+    --gas-budget 10000000 >/dev/null; then
     echo "ERROR: UpgradeCap burn FAILED." >&2
     echo "Package was published but is NOT yet immutable." >&2
     echo "Manual recovery:" >&2
     echo "  sui client call --package 0x2 --module package --function make_immutable \\" >&2
     echo "    --args $UPGRADE_CAP_ID --gas-budget 10000000" >&2
     exit 1
+else
+    echo "UpgradeCap burned. Package is now immutable."
 fi
-
-echo "UpgradeCap burned. Package is now immutable."
 echo ""
 
 # ============================================================================
