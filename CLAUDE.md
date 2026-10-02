@@ -180,6 +180,17 @@ re-run resumes rather than republishing. Unknown arguments are rejected.
 
 ---
 
+## Shipped bytecode (D23)
+
+- `bytecode/sui_token_template.mv` and `bytecode/build-info.json` ship in the npm package and are
+  generated only by `scripts/build-bytecode.sh` (`npm run build:bytecode`). Never edit them by hand.
+- Any change to `sources/` must be followed by `npm run build:bytecode` in the same commit; CI
+  (`--check`) fails on a mismatch.
+- `Move.lock` is committed and pins the framework revision, so the build is reproducible. Moving to a
+  newer framework is deliberate: delete `Move.lock`, rebuild, review the bytecode diff, commit.
+- Consumers (`@meddleware/sui-token-client`) read the bytecode and check `build-info.json` instead of
+  compiling.
+
 ## Working Rules
 
 ### When Using This Package

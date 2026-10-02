@@ -26,14 +26,18 @@ jobs:
 
       - name: Install Sui CLI (testnet channel)
         run: |
-          suiup install sui@testnet-v1.80.0
-          suiup switch sui@testnet-v1.80.0
+          suiup install sui@testnet-v1.81.0
+          suiup switch sui@testnet-v1.81.0
 
       - name: Verify Sui version
         run: sui --version
 
       - name: Build and test
         run: sui move test --build-env testnet
+
+      # D23: the shipped bytecode must equal a fresh build with the pinned CLI and Move.lock.
+      - name: Shipped bytecode matches a fresh build
+        run: bash scripts/build-bytecode.sh --check
 
   shellcheck:
     name: shellcheck (ops scripts)

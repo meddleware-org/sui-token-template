@@ -1,6 +1,6 @@
 {
   "name": "@meddleware/sui-token-template",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": false,
   "type": "module",
   "author": "MeddleWare <dev@meddleware.co.uk>",
@@ -18,10 +18,14 @@
     "access": "public"
   },
   "scripts": {
-    "test": "sui move test --build-env testnet"
+    "test": "sui move test --build-env testnet && bash scripts/build-bytecode.sh --check",
+    "build:bytecode": "bash scripts/build-bytecode.sh",
+    "check:bytecode": "bash scripts/build-bytecode.sh --check"
   },
   "exports": {
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./bytecode/sui_token_template.mv": "./bytecode/sui_token_template.mv",
+    "./bytecode/build-info.json": "./bytecode/build-info.json"
   },
   "files": [
     "Move.toml",
@@ -33,7 +37,8 @@
     "CLAUDE.md",
     "AGENTS.md",
     "LICENSE",
-    "SECURITY.md"
+    "SECURITY.md",
+    "bytecode/"
   ],
   "engines": {
     "node": "^22.18.0 || >=24.12.0"

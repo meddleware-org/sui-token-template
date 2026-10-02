@@ -293,6 +293,21 @@ bash scripts/deploy_token.sh
 
 ---
 
+## Shipped bytecode (`bytecode/`)
+
+The npm package ships the compiled template module so apps can patch and publish it without the Sui
+CLI (workspace decision D23):
+
+| File | Content |
+| --- | --- |
+| `bytecode/sui_token_template.mv` | `sui move build --build-env testnet` output (publishable; never the instrumented `sui move test` bytecode) |
+| `bytecode/build-info.json` | `toolchainVersion`, `buildEnv`, `frameworkRev` (from `Move.lock`), `sourceSha256`, `moduleSha256` |
+
+Both are exported (`@meddleware/sui-token-template/bytecode/…`). `Move.lock` is committed so the
+build is reproducible; CI rebuilds with the pinned CLI and fails if the shipped bytecode differs
+(`npm run check:bytecode`). After changing the source: `npm run build:bytecode` and commit. To move to
+a newer framework: delete `Move.lock`, rebuild, review, commit.
+
 ## Template Source (`sources/sui_token_template.move`)
 
 ### Structure
