@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The release workflow runs the same checks on the tagged commit.
+  workflow_call:
 
 permissions:
   contents: read
@@ -29,8 +31,17 @@ jobs:
           suiup install sui@testnet-v1.81.0
           suiup switch sui@testnet-v1.81.0
 
-      - name: Verify Sui version
-        run: sui --version
+      - name: Verify Sui version and binary checksum
+        run: |
+          sui --version
+          # The release asset suiup downloads is not checksum-verified by suiup itself: pin the binary.
+          echo "c86c0481a44174dfa17af89e71292d6fba5df267c66722ae6797e8793a22f7f1  $(command -v sui)" | sha256sum -c -
+
+      - name: The CLI line the scripts demand is the one the bytecode was built with
+        run: |
+          want=$(jq -r '.toolchainVersion' bytecode/build-info.json)
+          have=$(sui --version | awk '{print $2}' | cut -d- -f1)
+          [ "${want%.*}" = "${have%.*}" ] || { echo "build-info.json says $want, CI runs $have"; exit 1; }
 
       - name: Build and test
         run: sui move test --build-env testnet
@@ -46,4 +57,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # shellcheck is preinstalled on the GitHub-hosted Ubuntu runners.
       - name: shellcheck
-        run: shellcheck -x -P SCRIPTDIR scripts/*.sh templates/*.sh
+        run: shellcheck -x -P SCRIPTDIR scripts/*.sh templates/*.sh && shellcheck -S warning tests/*.sh
+
+  generator:
+    name: Generator behaviour tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Validation, one-pass substitution, and a failing run leaving an existing directory untouched.
+      - name: tests/generator.test.sh
+        run: bash tests/generator.test.sh

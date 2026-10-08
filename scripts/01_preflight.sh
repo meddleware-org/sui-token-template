@@ -98,11 +98,16 @@ if [[ "$CHAIN" != "$WANT_CHAIN" ]]; then
     echo "ERROR: chain identifier is '${CHAIN:-<unreachable>}', expected $WANT_CHAIN for $NETWORK." >&2
     exit 1
 fi
-# The shipped template bytecode is built with the CLI line pinned in the workspace toolchain table
-# (sui testnet-v1.80.x); another major.minor may emit bytecode the chain or the template tests reject.
+# The shipped template bytecode is built with one CLI line: bytecode/build-info.json `toolchainVersion` is the
+# single source CI, the artefact and this check share. Another major.minor may emit bytecode the chain or the
+# template tests reject.
+BUILD_INFO="$(dirname "${BASH_SOURCE[0]}")/../bytecode/build-info.json"
+RECORDED_TOOLCHAIN=$(jq -r '.toolchainVersion // empty' "$BUILD_INFO" 2>/dev/null || true)
+[[ -n "$RECORDED_TOOLCHAIN" ]] || { echo "ERROR: cannot read toolchainVersion from $BUILD_INFO." >&2; exit 1; }
+WANT_LINE="${TEMPLATE_SUI_VERSION:-${RECORDED_TOOLCHAIN%.*}}"
 CLI_VER=$(sui --version | awk '{print $2}' | cut -d- -f1)
-if [[ "${CLI_VER%.*}" != "${TEMPLATE_SUI_VERSION:-1.80}" ]]; then
-    echo "ERROR: sui CLI $CLI_VER; this template is built and tested with ${TEMPLATE_SUI_VERSION:-1.80}.x." >&2
+if [[ "${CLI_VER%.*}" != "$WANT_LINE" ]]; then
+    echo "ERROR: sui CLI $CLI_VER; this template is built and tested with ${WANT_LINE}.x (bytecode/build-info.json: $RECORDED_TOOLCHAIN)." >&2
     echo "       Install it with suiup, or set TEMPLATE_SUI_VERSION to override deliberately." >&2
     exit 1
 fi

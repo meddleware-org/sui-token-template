@@ -139,6 +139,10 @@ Please review the deployment configuration:
 
 EOF
 
+echo "  The constants compiled into the package (read from the generated source; permanent on-chain):"
+grep -E '^const (DECIMALS|SYMBOL|NAME|DESCRIPTION|ICON_URL):' "$OUTPUT_DIR/sources/$TOKEN_MODULE_NAME.move" | sed 's/^/    /'
+echo ""
+
 if [[ "$NETWORK" == "mainnet" && "${MAINNET_CONFIRM:-}" != "1" ]]; then
     echo "SKIPPED: mainnet publishes a real token; re-run with MAINNET_CONFIRM=1 to proceed." >&2
     exit 78
@@ -157,41 +161,63 @@ echo ""
 echo "=== Phase 6: Publish ==="
 echo ""
 
+# Every ID is saved to $OUTPUT_DIR/.env.<network> as soon as it is known (git-ignored), so a crash after
+# publish leaves a record to resume from instead of a second coin.
+ENV_RECORD="$OUTPUT_DIR/.env.${NETWORK}"
+if [[ -s "$ENV_RECORD" ]] && grep -q '^TOKEN_PACKAGE_ID=' "$ENV_RECORD"; then
+    echo "ERROR: $ENV_RECORD already records a published package ($(grep '^TOKEN_PACKAGE_ID=' "$ENV_RECORD"))." >&2
+    echo "       Publishing again would create a SECOND coin. Resume with $OUTPUT_DIR/scripts/publish.sh," >&2
+    echo "       or move that record away if a new coin is really intended." >&2
+    exit 1
+fi
+record() { # <KEY> <value> — set KEY in the record
+    if [[ -f "$ENV_RECORD" ]] && grep -q "^$1=" "$ENV_RECORD"; then
+        sed -i "s|^$1=.*|$1=$2|" "$ENV_RECORD"
+    else
+        echo "$1=$2" >> "$ENV_RECORD"
+    fi
+}
+
 PUBLISH_OUTPUT=$(sui client publish "$OUTPUT_DIR" --gas-budget 100000000 --json)
 echo "$PUBLISH_OUTPUT"
 
-# Parse package ID and TreasuryCap object ID
-PACKAGE_ID=$(echo "$PUBLISH_OUTPUT" | jq -r '.objectChanges[] | select(.type == "published") | .packageId')
-TREASURY_CAP_ID=$(echo "$PUBLISH_OUTPUT" | jq -r '.objectChanges[] | select(.objectType? | strings | test("TreasuryCap")) | .objectId')
-
+# Parse package ID, then the capabilities by their EXACT types (never by substring).
+PACKAGE_ID=$(echo "$PUBLISH_OUTPUT" | jq -r '[.objectChanges[] | select(.type == "published") | .packageId] | if length == 1 then .[0] else "" end')
 if [[ -z "$PACKAGE_ID" || "$PACKAGE_ID" == "null" ]]; then
     echo "ERROR: Could not parse package ID from publish output" >&2
     exit 1
 fi
+COIN_TYPE="${PACKAGE_ID}::${TOKEN_MODULE_NAME}::${TOKEN_STRUCT_NAME}"
+created_id() { # <exact objectType>
+    echo "$PUBLISH_OUTPUT" | jq -r --arg t "$1" \
+        '[.objectChanges[] | select(.type == "created" and .objectType == $t) | .objectId] | if length == 1 then .[0] else "" end'
+}
+TREASURY_CAP_ID=$(created_id "0x2::coin::TreasuryCap<${COIN_TYPE}>")
+UPGRADE_CAP_ID=$(created_id "0x2::package::UpgradeCap")
+record TOKEN_PACKAGE_ID "$PACKAGE_ID"
+record TOKEN_COIN_TYPE "$COIN_TYPE"
 
 if [[ -z "$TREASURY_CAP_ID" || "$TREASURY_CAP_ID" == "null" ]]; then
-    echo "ERROR: Could not parse TreasuryCap object ID from publish output" >&2
+    echo "ERROR: Could not find exactly one TreasuryCap<$COIN_TYPE> in the publish output (the package IS published: see $ENV_RECORD)" >&2
     exit 1
 fi
-
-# Parse UpgradeCap object ID
-UPGRADE_CAP_ID=$(echo "$PUBLISH_OUTPUT" | jq -r '.objectChanges[] | select(.objectType? | strings | test("UpgradeCap")) | .objectId')
-
 if [[ -z "$UPGRADE_CAP_ID" || "$UPGRADE_CAP_ID" == "null" ]]; then
-    echo "ERROR: Could not parse UpgradeCap object ID from publish output" >&2
+    echo "ERROR: Could not find exactly one UpgradeCap in the publish output (the package IS published: see $ENV_RECORD)" >&2
     exit 1
 fi
-
-COIN_TYPE="${PACKAGE_ID}::${TOKEN_MODULE_NAME}::${TOKEN_STRUCT_NAME}"
+record TOKEN_TREASURY_CAP_ID "$TREASURY_CAP_ID"
+record TOKEN_UPGRADE_CAP_ID "$UPGRADE_CAP_ID"
 METADATA_CAP_ID=$(echo "$PUBLISH_OUTPUT" | jq -r --arg t "::coin_registry::MetadataCap<${COIN_TYPE}>" \
     '[.objectChanges[] | select(.type == "created" and (.objectType | endswith($t))) | .objectId] | .[0] // empty')
 PENDING_CURRENCY_ID=$(echo "$PUBLISH_OUTPUT" | jq -r --arg t "::coin_registry::Currency<${COIN_TYPE}>" \
     '[.objectChanges[] | select(.type == "created" and (.objectType | endswith($t))) | .objectId] | .[0] // empty')
 
 if [[ -z "$METADATA_CAP_ID" || -z "$PENDING_CURRENCY_ID" ]]; then
-    echo "ERROR: Could not parse MetadataCap / pending Currency object IDs from publish output" >&2
+    echo "ERROR: Could not parse MetadataCap / pending Currency object IDs from publish output (the package IS published: see $ENV_RECORD)" >&2
     exit 1
 fi
+record TOKEN_METADATA_CAP_ID "$METADATA_CAP_ID"
+record TOKEN_PENDING_CURRENCY_ID "$PENDING_CURRENCY_ID"
 
 echo ""
 echo "  Package ID:        $PACKAGE_ID"
@@ -228,6 +254,7 @@ if ! FINALIZE_OUTPUT=$(sui client call \
 fi
 CURRENCY_ID=$(echo "$FINALIZE_OUTPUT" | jq -r --arg t "::coin_registry::Currency<${COIN_TYPE}>" \
     '[.objectChanges[] | select(.type == "created" and (.objectType | endswith($t))) | .objectId] | .[0] // empty')
+[[ -z "$CURRENCY_ID" ]] || record TOKEN_CURRENCY_ID "$CURRENCY_ID"
 echo "Currency registered (shared): ${CURRENCY_ID:-<see transaction>}"
 echo ""
 
@@ -258,7 +285,13 @@ elif ! sui client call --json \
     echo "    --args $UPGRADE_CAP_ID --gas-budget 10000000" >&2
     exit 1
 else
-    echo "UpgradeCap burned. Package is now immutable."
+    # Success is not inferred from the exit code: the UpgradeCap must be gone (consumed).
+    if sui client object "$UPGRADE_CAP_ID" --json >/dev/null 2>&1; then
+        echo "ERROR: the burn call returned, but UpgradeCap $UPGRADE_CAP_ID still exists. The package is NOT immutable." >&2
+        exit 1
+    fi
+    record TOKEN_UPGRADE_CAP_BURNED "yes"
+    echo "UpgradeCap burned and verified gone. Package is now immutable."
 fi
 echo ""
 
@@ -268,6 +301,16 @@ echo ""
 
 echo "=== Phase 7: Transfer TreasuryCap ==="
 echo ""
+echo "  TreasuryCap $TREASURY_CAP_ID  ->  $TREASURY_ADDRESS"
+echo "  This hands over the authority to mint supply, and cannot be undone."
+# The earlier confirmations do not cover this irreversible step: name the address and ask again.
+if [[ "$NETWORK" == "mainnet" ]]; then
+    read -rp "Type the first 10 characters of the treasury address (${TREASURY_ADDRESS:0:10}) to transfer: " TRANSFER_CONFIRMATION
+    [[ "$TRANSFER_CONFIRMATION" == "${TREASURY_ADDRESS:0:10}" ]] || { echo "Transfer declined. The TreasuryCap stays with the deployer ($TREASURY_CAP_ID)." >&2; exit 1; }
+else
+    read -rp "Type TRANSFER to send the TreasuryCap to $TREASURY_ADDRESS: " TRANSFER_CONFIRMATION
+    [[ "$TRANSFER_CONFIRMATION" == "TRANSFER" ]] || { echo "Transfer declined. The TreasuryCap stays with the deployer ($TREASURY_CAP_ID)." >&2; exit 1; }
+fi
 
 if ! sui client transfer --object-id "$TREASURY_CAP_ID" \
        --to "$TREASURY_ADDRESS" --gas-budget 10000000; then
@@ -280,7 +323,14 @@ if ! sui client transfer --object-id "$TREASURY_CAP_ID" \
     exit 1
 fi
 
-echo "TreasuryCap successfully transferred to $TREASURY_ADDRESS"
+# Re-read the owner: the transfer counts only if the chain says so.
+NEW_OWNER=$(sui client object "$TREASURY_CAP_ID" --json 2>/dev/null | jq -r '.owner.AddressOwner // empty')
+if [[ "${NEW_OWNER,,}" != "${TREASURY_ADDRESS,,}" ]]; then
+    echo "ERROR: TreasuryCap $TREASURY_CAP_ID is owned by '${NEW_OWNER:-<unknown>}' after the transfer, not $TREASURY_ADDRESS." >&2
+    exit 1
+fi
+record TOKEN_TREASURY_CAP_OWNER "$NEW_OWNER"
+echo "TreasuryCap transferred to $TREASURY_ADDRESS (verified on-chain)"
 echo ""
 
 # ============================================================================

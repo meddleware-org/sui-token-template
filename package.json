@@ -1,6 +1,6 @@
 {
   "name": "@meddleware/sui-token-template",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "private": false,
   "type": "module",
   "author": "MeddleWare <dev@meddleware.co.uk>",
@@ -32,7 +32,9 @@
     "sources/",
     "templates/",
     "scripts/",
-    "docs/",
+    "docs/onchain/",
+    "docs/IMPLEMENTATION_GUIDE.md",
+    "docs/WALRUS.md",
     "README.md",
     "CLAUDE.md",
     "AGENTS.md",

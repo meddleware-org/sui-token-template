@@ -175,7 +175,7 @@ bash scripts/03_create_token.sh \
   --output-dir my_token
 ```
 
-**Idempotency:** Running the script multiple times with the same output directory overwrites the previous instance. This is the intended workflow for updating a token instance (e.g., to set the icon URL before mainnet deployment).
+**Idempotency:** Running the script multiple times with the same output directory updates the previous instance in place (a failing run leaves it untouched). This is the intended workflow for updating a token instance (e.g., to set the icon URL before mainnet deployment).
 
 ---
 

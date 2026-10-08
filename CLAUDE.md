@@ -136,7 +136,7 @@ my_token/         # Example: a generated concrete instance
 6. Renames source file: `sui_token_template.move` → `$TOKEN_MODULE_NAME.move`.
 7. Validates no `sui_token_template` identifier remains (catches incomplete substitution).
 
-**Idempotency:** Running again with the same output directory overwrites the instance. This is the intended workflow for updating (e.g., setting icon URL before mainnet).
+**Idempotency:** Running again with the same output directory updates the instance in place (generated files are overwritten; other files, `.env.<network>` and `deployments.md` edits aside, are not touched). This is the intended workflow for updating (e.g., setting icon URL before mainnet). The package is generated in a temporary directory and installed only after every check passed, so a failing run leaves an existing directory byte-identical; the script refuses `/`, `$HOME`, `.` and a git work-tree root unless `FORCE_OUTPUT_DIR=1`. Every value is validated with the rules of `@meddleware/sui-token-client`'s `assertTokenConfig` and written literally (exact tokens and whole lines, one pass); `tests/generator.test.sh` pins this.
 
 ### `scripts/deploy_token.sh` — Full Deployment Pipeline
 
@@ -144,14 +144,14 @@ my_token/         # Example: a generated concrete instance
 
 **Phases:**
 
-1. **Preflight** — Validate env vars, tools, network, image, address formats. The active Sui env, the chain identifier and the CLI major.minor (1.80) must match — each a hard failure. Check SUI balance (warning only). Mainnet additionally requires `MAINNET_CONFIRM=1` (a skipped run exits 78).
+1. **Preflight** — Validate env vars, tools, network, image, address formats. The active Sui env, the chain identifier and the CLI major.minor (the `toolchainVersion` in `bytecode/build-info.json`, the one source CI and the artefact share) must match — each a hard failure. Check SUI balance (warning only). Mainnet additionally requires `MAINNET_CONFIRM=1` (a skipped run exits 78).
 2. **Walrus Upload** — Upload image to Walrus (50 epochs testnet, 200 mainnet). Parse blob ID and object ID. Prompt user to verify URL.
 3. **Generate** — Call `03_create_token.sh` with derived icon URL.
 4. **Build & Test** — Run `sui move test` and `sui move build`.
 5. **Confirmation** — Print summary, require user type `CONFIRM`.
 6. **Publish** — Run `sui client publish --gas-budget 100000000`. Parse package ID and TreasuryCap ID.
 7. **Burn UpgradeCap** — asks for its own typed `BURN` confirmation (the publish `CONFIRM` does not cover it), then calls `0x2::package::make_immutable`. Declining keeps the UpgradeCap and prints the command to burn it later.
-8. **Transfer TreasuryCap** — Transfer to governance multisig. Includes recovery instructions if transfer fails (print object ID and manual command).
+8. **Transfer TreasuryCap** — Transfer to governance multisig after its own typed confirmation (`TRANSFER`; on mainnet the first 10 characters of the address), then re-read the owner. The burn is verified by the UpgradeCap no longer existing, and every ID is saved to `$OUTPUT_DIR/.env.<network>` as soon as it is known (a second run refuses to publish a second coin). Includes recovery instructions if transfer fails (print object ID and manual command).
 9. **Summary** — Print all IDs, blob URLs, addresses, and next steps.
 
 **Error Handling:**
