@@ -101,11 +101,12 @@ my_token/         # Example: a generated concrete instance
 
 - **Exports:** Nothing public. All functionality is used via the coin registry system.
 - **Defines:** `SUI_TOKEN_TEMPLATE` (type witness), `init()` (one-time-use initialization).
-- **Tests:** Four inline unit tests verify TreasuryCap transfer/presence, MetadataCap presence, and Currency transfer to the registry.
+- **Tests:** Six inline unit tests (`init_with` takes the policy as arguments so each combination is testable). One checks whatever constants the package was generated with against the registry's `Currency` (`is_supply_fixed`, `is_metadata_cap_deleted`, `total_supply`), so generated instances inherit a test that stays true after patching; do not write tests that assume the shipped defaults.
 - **Constraints:**
   - Uses `coin_registry::new_currency_with_otw()` to bind the coin type to this package.
-  - Calls `builder.finalize(ctx)` — which **claims a live `MetadataCap`** (name/symbol/decimals stay immutable, but description and icon remain updatable via governance). It does NOT delete the cap.
-  - Transfers both the `TreasuryCap` and the `MetadataCap` to the deployer (transaction sender).
+  - Applies the supply and metadata policy itself, in the publish transaction (the patchable constants `INITIAL_SUPPLY`, `FIXED_SUPPLY`, `FROZEN_METADATA`): mints the initial supply to the sender; `FIXED_SUPPLY` → `make_supply_fixed` (the registry takes the `TreasuryCap`; the framework aborts if nothing was minted); `FROZEN_METADATA` → `finalize_and_delete_metadata_cap`; otherwise `finalize` claims a live `MetadataCap` for the sender.
+  - Never moves policy into a later transaction: a policy applied after publish leaves a window in which the cap exists, and a freshly shared `Currency` cannot be borrowed `&mut` in the PTB that shares it.
+  - The two booleans keep DIFFERENT default values (`true` / `false`): equal constants share one pool entry and could not be patched independently.
 
 **Key decision:** Tests are inline (`#[test]` attributes in the same file) rather than in a separate `tests/` directory. This keeps the package minimal and allows test coverage to be inherited by generated instances.
 
@@ -149,7 +150,7 @@ my_token/         # Example: a generated concrete instance
 3. **Generate** — Call `03_create_token.sh` with derived icon URL.
 4. **Build & Test** — Run `sui move test` and `sui move build`.
 5. **Confirmation** — Print summary, require user type `CONFIRM`.
-6. **Publish** — Run `sui client publish --gas-budget 100000000`. Parse package ID and TreasuryCap ID.
+6. **Publish** — Run `sui client publish --gas-budget 100000000`. Parse the package ID and the objects `init` created (TreasuryCap unless fixed, initial supply Coin, MetadataCap unless frozen).
 7. **Burn UpgradeCap** — asks for its own typed `BURN` confirmation (the publish `CONFIRM` does not cover it), then calls `0x2::package::make_immutable`. Declining keeps the UpgradeCap and prints the command to burn it later.
 8. **Transfer TreasuryCap** — Transfer to governance multisig after its own typed confirmation (`TRANSFER`; on mainnet the first 10 characters of the address), then re-read the owner. The burn is verified by the UpgradeCap no longer existing, and every ID is saved to `$OUTPUT_DIR/.env.<network>` as soon as it is known (a second run refuses to publish a second coin). Includes recovery instructions if transfer fails (print object ID and manual command).
 9. **Summary** — Print all IDs, blob URLs, addresses, and next steps.

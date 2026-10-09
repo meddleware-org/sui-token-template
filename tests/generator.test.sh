@@ -18,7 +18,7 @@ base_env() {
   export TOKEN_SYMBOL="MTK" TOKEN_NAME="My Token" TOKEN_DESCRIPTION="A friendly token"
   export TOKEN_PACKAGE_DESCRIPTION="Official MTK token." TOKEN_PROJECT_NAME="My Project"
   export TOKEN_DECIMALS="9" TOKEN_ICON_URL="https://example.com/i.png"
-  unset TOKEN_LICENSE TOKEN_LICENSE_TEXT_FILE TOKEN_LICENSE_NAME TOKEN_COPYRIGHT_HOLDER FORCE_OUTPUT_DIR
+  unset TOKEN_INITIAL_SUPPLY TOKEN_SUPPLY_POLICY TOKEN_METADATA_POLICY TOKEN_LICENSE TOKEN_LICENSE_TEXT_FILE TOKEN_LICENSE_NAME TOKEN_COPYRIGHT_HOLDER FORCE_OUTPUT_DIR
 }
 
 # run <dir> -> exit code in $RC, output in $OUT
@@ -36,6 +36,38 @@ tree_hash() { (cd "$1" && find . -type f -print0 | sort -z | xargs -0 sha256sum 
     && ok "default generation writes the expected constants" || bad "constants" "$(grep -n '^const' "$src")"
   [[ -f "$WORK/ok/LICENSE" && -f "$WORK/ok/README.md" && -f "$WORK/ok/deployments.md" ]] && ok "writes LICENSE, README and deployments.md" || bad "files"
   echo "$OUT" | grep -q 'const SYMBOL' && ok "prints the generated constants" || bad "constants summary" "$OUT"
+) || true
+
+# ── supply and metadata policy ─────────────────────────────────────────────────────
+(
+  base_env; run "$WORK/pol-default"
+  src="$WORK/pol-default/sources/mytoken.move"
+  grep -q '^const INITIAL_SUPPLY: u64 = 0;$' "$src" && grep -q '^const FIXED_SUPPLY: bool = false;$' "$src" \
+    && grep -q '^const FROZEN_METADATA: bool = false;$' "$src" \
+    && ok "defaults keep the old behaviour: no initial supply, mintable, updatable metadata" || bad "policy defaults" "$(grep -n '^const' "$src")"
+  grep -q '^METADATA_POLICY="updatable"$' "$WORK/pol-default/scripts/publish.sh" \
+    && ok "publish.sh carries the metadata policy" || bad "publish.sh policy"
+
+  TOKEN_INITIAL_SUPPLY=1000 TOKEN_SUPPLY_POLICY=fixed TOKEN_METADATA_POLICY=frozen run "$WORK/pol-fixed"
+  src="$WORK/pol-fixed/sources/mytoken.move"
+  [[ $RC -eq 0 ]] && grep -q '^const INITIAL_SUPPLY: u64 = 1000000000000;$' "$src" && grep -q '^const FIXED_SUPPLY: bool = true;$' "$src" \
+    && grep -q '^const FROZEN_METADATA: bool = true;$' "$src" \
+    && ok "writes the raw supply (whole tokens x 10^decimals) and both policies" || bad "fixed policy" "rc=$RC $(grep -n '^const' "$src")"
+  grep -q '^METADATA_POLICY="frozen"$' "$WORK/pol-fixed/scripts/publish.sh" && ok "publish.sh knows the metadata is frozen" || bad "publish.sh frozen"
+  grep -qF '| Supply policy | `fixed` |' "$WORK/pol-fixed/README.md" && ok "README states the supply policy" || bad "README policy"
+
+  TOKEN_SUPPLY_POLICY=fixed run "$WORK/pol-empty"
+  [[ $RC -ne 0 && ! -e "$WORK/pol-empty" ]] && ok "rejects a fixed supply with nothing to mint" || bad "fixed without supply" "rc=$RC $OUT"
+  TOKEN_INITIAL_SUPPLY=18446744073 TOKEN_DECIMALS=9 run "$WORK/pol-max"
+  [[ $RC -eq 0 ]] && ok "accepts a raw supply at the u64 range (18446744073 x 10^9)" || bad "u64 boundary ok" "$OUT"
+  TOKEN_INITIAL_SUPPLY=18446744074 TOKEN_DECIMALS=9 run "$WORK/pol-over"
+  [[ $RC -ne 0 && ! -e "$WORK/pol-over" ]] && ok "rejects a raw supply above u64::MAX" || bad "u64 overflow" "rc=$RC $OUT"
+  TOKEN_INITIAL_SUPPLY=99999999999999999999999 run "$WORK/pol-huge"; [[ $RC -ne 0 ]] && ok "rejects an oversized supply string" || bad "huge supply"
+  TOKEN_INITIAL_SUPPLY='1; const X' run "$WORK/pol-inj"; [[ $RC -ne 0 ]] && ok "rejects a non-numeric supply" || bad "supply injection"
+  TOKEN_SUPPLY_POLICY=burnable run "$WORK/pol-bad1"; [[ $RC -ne 0 ]] && ok "rejects an unknown supply policy" || bad "supply policy enum"
+  TOKEN_METADATA_POLICY=locked run "$WORK/pol-bad2"; [[ $RC -ne 0 ]] && ok "rejects an unknown metadata policy" || bad "metadata policy enum"
+  TOKEN_INITIAL_SUPPLY=0005 run "$WORK/pol-zeros"
+  grep -q '^const INITIAL_SUPPLY: u64 = 5000000000;$' "$WORK/pol-zeros/sources/mytoken.move" && ok "leading zeros do not change the amount" || bad "leading zeros"
 ) || true
 
 # ── injection and special characters ───────────────────────────────────────────────

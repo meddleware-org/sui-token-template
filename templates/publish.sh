@@ -11,9 +11,14 @@
 #
 # Steps (each is resumable — IDs are saved to .env.<network> as soon as they exist, so a re-run
 # continues where a failed run stopped instead of publishing a second package):
-#   1. publish                       → package, TreasuryCap, MetadataCap, pending Currency, UpgradeCap
+#   1. publish                       → package, pending Currency, UpgradeCap, the initial-supply Coin (if any),
+#                                      and whichever of TreasuryCap / MetadataCap the coin's policies keep
+#                                      (a fixed supply has no TreasuryCap, frozen metadata no MetadataCap —
+#                                      `init` applied both in this transaction)
 #   2. coin_registry::finalize_registration → shared, wallet-discoverable Currency<SUI_TOKEN_TEMPLATE>
-#   3. coin_registry::set_icon_url   → network-specific icon (needs SUI_TOKEN_TEMPLATE_ICON_URL)
+#   3. coin_registry::set_icon_url   → network-specific icon (needs SUI_TOKEN_TEMPLATE_ICON_URL);
+#                                      skipped when the metadata policy is "frozen" (the icon is the
+#                                      ICON_URL constant, for good)
 #   4. package::make_immutable       → only with --confirm-immutable or an interactive CONFIRM;
 #                                      verified by the UpgradeCap no longer existing.
 set -euo pipefail
@@ -109,13 +114,15 @@ fi
 
 load_env "$NETWORK"
 COIN_TYPE_SUFFIX="::XMODULENAMEX::SUI_TOKEN_TEMPLATE"
+# Fixed when the package was generated; "frozen" means init deleted the MetadataCap.
+METADATA_POLICY="XMETADATAPOLICYX"
 
 # ─ 1. Publish ────────────────────────────────────────────────────────────────
 
 if [[ -n "${SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID:-}" ]]; then
 	log "XPACKAGENAMEX already published: $SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID (resuming)"
 else
-	require_env "SUI_TOKEN_TEMPLATE_ICON_URL"
+	[[ "$METADATA_POLICY" == "frozen" ]] || require_env "SUI_TOKEN_TEMPLATE_ICON_URL"
 	log "Publishing XPACKAGENAMEX package from $PKG_DIR..."
 	if [[ "$NETWORK" == "localnet" ]]; then
 		# Sui >= 1.80 only publishes to environments declared in Move.toml; localnet uses an
@@ -131,18 +138,28 @@ else
 	SUI_TOKEN_TEMPLATE_METADATA_CAP_ID=$(get_created_object "$PUBLISH_OUTPUT" "::coin_registry::MetadataCap<${SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID}${COIN_TYPE_SUFFIX}>")
 	SUI_TOKEN_TEMPLATE_PENDING_CURRENCY_ID=$(get_created_object "$PUBLISH_OUTPUT" "::coin_registry::Currency<${SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID}${COIN_TYPE_SUFFIX}>")
 	SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID=$(get_created_object "$PUBLISH_OUTPUT" "::package::UpgradeCap")
+	# The minted initial supply (absent when the supply is 0). Exact type: `Coin<…>` also ends the type of
+	# no other object created here.
+	SUI_TOKEN_TEMPLATE_INITIAL_COIN_ID=$(get_created_object "$PUBLISH_OUTPUT" "::coin::Coin<${SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID}${COIN_TYPE_SUFFIX}>")
 
-	for v in SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID SUI_TOKEN_TEMPLATE_METADATA_CAP_ID \
-		SUI_TOKEN_TEMPLATE_PENDING_CURRENCY_ID SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID; do
+	# Always present.
+	for v in SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID SUI_TOKEN_TEMPLATE_PENDING_CURRENCY_ID SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID; do
 		if [[ -z "${!v}" || "${!v}" == "null" ]]; then
 			log "ERROR: could not extract $v from publish output"
 			log "Output: $PUBLISH_OUTPUT"
 			exit 1
 		fi
 	done
-	for v in SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID SUI_TOKEN_TEMPLATE_METADATA_CAP_ID \
-		SUI_TOKEN_TEMPLATE_PENDING_CURRENCY_ID SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID; do
-		save_env "$NETWORK" "$v" "${!v}"
+	# Present only if the coin's policies keep them. A MetadataCap is required unless the metadata is frozen;
+	# a missing TreasuryCap means a fixed supply, which the registry records.
+	if [[ "$METADATA_POLICY" != "frozen" && -z "$SUI_TOKEN_TEMPLATE_METADATA_CAP_ID" ]]; then
+		log "ERROR: could not extract the MetadataCap from publish output (metadata policy: $METADATA_POLICY)"
+		log "Output: $PUBLISH_OUTPUT"
+		exit 1
+	fi
+	for v in SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID SUI_TOKEN_TEMPLATE_PENDING_CURRENCY_ID SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID \
+		SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID SUI_TOKEN_TEMPLATE_METADATA_CAP_ID SUI_TOKEN_TEMPLATE_INITIAL_COIN_ID; do
+		[[ -z "${!v}" ]] || save_env "$NETWORK" "$v" "${!v}"
 	done
 	log "Published XPACKAGENAMEX package successfully"
 fi
@@ -176,7 +193,9 @@ fi
 
 # ─ 3. Network-specific icon URL (while the sender still holds MetadataCap) ──
 
-if [[ "${SUI_TOKEN_TEMPLATE_ICON_URL_SET:-}" == "${SUI_TOKEN_TEMPLATE_ICON_URL:-}" && -n "${SUI_TOKEN_TEMPLATE_ICON_URL:-}" ]]; then
+if [[ -z "${SUI_TOKEN_TEMPLATE_METADATA_CAP_ID:-}" ]]; then
+	log "Metadata is frozen (no MetadataCap): the icon stays the ICON_URL constant compiled into the package"
+elif [[ "${SUI_TOKEN_TEMPLATE_ICON_URL_SET:-}" == "${SUI_TOKEN_TEMPLATE_ICON_URL:-}" && -n "${SUI_TOKEN_TEMPLATE_ICON_URL:-}" ]]; then
 	log "Icon URL already set: $SUI_TOKEN_TEMPLATE_ICON_URL"
 else
 	require_env "SUI_TOKEN_TEMPLATE_ICON_URL"
@@ -232,8 +251,9 @@ fi
 
 if [[ "$OUTPUT_ENV" == "true" ]]; then
 	echo "SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID=$SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID"
-	echo "SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID=$SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID"
-	echo "SUI_TOKEN_TEMPLATE_METADATA_CAP_ID=$SUI_TOKEN_TEMPLATE_METADATA_CAP_ID"
+	echo "SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID=${SUI_TOKEN_TEMPLATE_TREASURY_CAP_ID:-}"
+	echo "SUI_TOKEN_TEMPLATE_METADATA_CAP_ID=${SUI_TOKEN_TEMPLATE_METADATA_CAP_ID:-}"
+	echo "SUI_TOKEN_TEMPLATE_INITIAL_COIN_ID=${SUI_TOKEN_TEMPLATE_INITIAL_COIN_ID:-}"
 	echo "SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID=$SUI_TOKEN_TEMPLATE_METADATA_OBJECT_ID"
 	echo "SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID=$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID"
 fi

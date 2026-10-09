@@ -15,7 +15,7 @@ This package is a **generic Sui coin template and deployment system** for genera
 3. Tests and builds locally.
 4. Publishes on-chain (testnet or mainnet).
 5. Burns the UpgradeCap (makes the package immutable).
-6. Transfers TreasuryCap to governance.
+6. Transfers the TreasuryCap (if the supply is mintable) and the initial supply to governance.
 
 **Immutability profile:**
 
@@ -184,12 +184,10 @@ sui move test --build-env testnet
 sui move test --path my_token --build-env testnet
 ```
 
-Tests are inherited from the template via substitution. Four tests:
-
-1. TreasuryCap is transferred to the deployer.
-2. TreasuryCap is present after init.
-3. MetadataCap is present after init (metadata stays governance-updatable).
-4. Currency is transferred to the registry address, pending `finalize_registration`.
+Tests are inherited from the template via substitution. Six tests cover every policy combination:
+the generated constants applied to the registry's `Currency`, a mintable supply, a mintable supply
+with no initial mint, frozen metadata, mintable with updatable metadata, and the abort for a fixed
+supply with nothing minted.
 
 **Integration verification:**
 

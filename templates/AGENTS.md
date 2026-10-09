@@ -18,10 +18,14 @@ shared and discoverable, wallets and the gRPC/GraphQL coin-metadata APIs only re
 it *after* that step has run — `scripts/publish.sh` performs it automatically.
 Metadata fields:
 
-- **Immutable**: Name, symbol, decimals
-- **Mutable**: Description and icon URL — gated by `MetadataCap<XSTRUCTNAMEX>`. The
+- **Immutable**: Name, symbol, decimals — and description and icon URL too when the metadata
+  policy is `frozen` (the `MetadataCap` was deleted in `init`; this package: `XMETADATAPOLICYX`).
+- **Mutable** (`updatable` metadata): Description and icon URL — gated by `MetadataCap<XSTRUCTNAMEX>`. The
   *initial* per-network icon is set once directly by `scripts/publish.sh` via
   `coin_registry::set_icon_url`. Subsequent updates go through governance.
+
+Supply: policy `XSUPPLYPOLICYX`, initial supply `XINITIALSUPPLYX` whole tokens minted by `init`. A
+`fixed` supply was handed to the registry (no `TreasuryCap` exists); a `mintable` one keeps a `TreasuryCap`.
 
 ## Verification Commands
 

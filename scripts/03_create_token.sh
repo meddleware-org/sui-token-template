@@ -19,6 +19,16 @@ set -euo pipefail
 #   TOKEN_ICON_URL="https://blob-url" \
 #   bash scripts/03_create_token.sh --output-dir my_token
 #
+# Optional supply and metadata policy (applied by the coin's own `init`, in the publish transaction):
+#   TOKEN_INITIAL_SUPPLY    whole tokens minted to the publisher at publish (default 0; the raw amount,
+#                           times 10^decimals, must fit a u64)
+#   TOKEN_SUPPLY_POLICY     "mintable" (default: the TreasuryCap goes to the publisher) or "fixed" (the
+#                           registry takes the TreasuryCap: the supply can never grow and the registry
+#                           reports it; needs TOKEN_INITIAL_SUPPLY > 0)
+#   TOKEN_METADATA_POLICY   "updatable" (default: the MetadataCap goes to the publisher) or "frozen"
+#                           (the MetadataCap is deleted: name, symbol, description and icon can never
+#                           change and the registry reports it)
+#
 # Every value is validated with the same rules as @meddleware/sui-token-client's assertTokenConfig before
 # anything is written (identifiers, safe text without quotes or backslashes, per-field limits, decimals
 # 0-18, https:// or ipfs:// icons). Values are substituted by exact token or line in a single pass, so
@@ -121,6 +131,39 @@ fi
 [[ "$TOKEN_DECIMALS" =~ ^[0-9]+$ && "$TOKEN_DECIMALS" -ge 0 && "$TOKEN_DECIMALS" -le 18 && ${#TOKEN_DECIMALS} -le 2 ]] \
     || fail "Invalid decimals '$TOKEN_DECIMALS': a whole number between 0 and 18."
 TOKEN_DECIMALS=$((10#$TOKEN_DECIMALS))
+
+# Supply and metadata policy. The raw amount is computed on the digit string (bash integers are signed
+# 64-bit) and compared with u64::MAX the same way, so an oversized amount fails here, not at publish.
+TOKEN_INITIAL_SUPPLY="${TOKEN_INITIAL_SUPPLY:-0}"
+TOKEN_SUPPLY_POLICY="${TOKEN_SUPPLY_POLICY:-mintable}"
+TOKEN_METADATA_POLICY="${TOKEN_METADATA_POLICY:-updatable}"
+[[ "$TOKEN_INITIAL_SUPPLY" =~ ^[0-9]{1,20}$ ]] || fail "Invalid initial supply '$TOKEN_INITIAL_SUPPLY': a whole number of tokens."
+[[ "$TOKEN_SUPPLY_POLICY" == "mintable" || "$TOKEN_SUPPLY_POLICY" == "fixed" ]] \
+    || fail "Invalid supply policy '$TOKEN_SUPPLY_POLICY': mintable or fixed."
+[[ "$TOKEN_METADATA_POLICY" == "updatable" || "$TOKEN_METADATA_POLICY" == "frozen" ]] \
+    || fail "Invalid metadata policy '$TOKEN_METADATA_POLICY': updatable or frozen."
+TOKEN_INITIAL_SUPPLY="$(printf '%s' "$TOKEN_INITIAL_SUPPLY" | sed 's/^0*//')"
+TOKEN_INITIAL_SUPPLY="${TOKEN_INITIAL_SUPPLY:-0}"
+if [[ "$TOKEN_INITIAL_SUPPLY" == "0" ]]; then
+    RAW_SUPPLY="0"
+else
+    RAW_SUPPLY="${TOKEN_INITIAL_SUPPLY}$(printf '%*s' "$TOKEN_DECIMALS" '' | tr ' ' '0')"
+fi
+U64_MAX="18446744073709551615"
+# Equal-length digit strings order like the numbers they spell, so a byte-wise sort decides the comparison.
+raw_exceeds_u64() {
+    [[ ${#RAW_SUPPLY} -gt ${#U64_MAX} ]] && return 0
+    [[ ${#RAW_SUPPLY} -eq ${#U64_MAX} && "$RAW_SUPPLY" != "$U64_MAX" \
+        && "$(printf '%s\n%s\n' "$RAW_SUPPLY" "$U64_MAX" | LC_ALL=C sort | tail -n 1)" == "$RAW_SUPPLY" ]]
+}
+if raw_exceeds_u64; then
+    fail "Initial supply $TOKEN_INITIAL_SUPPLY with $TOKEN_DECIMALS decimals exceeds the u64 maximum ($U64_MAX raw units)."
+fi
+if [[ "$TOKEN_SUPPLY_POLICY" == "fixed" && "$RAW_SUPPLY" == "0" ]]; then
+    fail "A fixed supply needs TOKEN_INITIAL_SUPPLY > 0: the supply is minted at publish and can never change."
+fi
+if [[ "$TOKEN_SUPPLY_POLICY" == "fixed" ]]; then FIXED_SUPPLY_LITERAL="true"; else FIXED_SUPPLY_LITERAL="false"; fi
+if [[ "$TOKEN_METADATA_POLICY" == "frozen" ]]; then FROZEN_METADATA_LITERAL="true"; else FROZEN_METADATA_LITERAL="false"; fi
 
 # Locate template directory (script's parent directory)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -235,6 +278,7 @@ chmod +x "$STAGE/scripts/publish.sh"
 sed -i "s/SUI_TOKEN_TEMPLATE/$TOKEN_STRUCT_NAME/g" "$STAGE/scripts/publish.sh"
 sed -i "s|XMODULENAMEX|$TOKEN_MODULE_NAME|g" "$STAGE/scripts/publish.sh"
 sed -i "s|XPACKAGENAMEX|$TOKEN_PACKAGE_NAME|g" "$STAGE/scripts/publish.sh"
+sed -i "s|XMETADATAPOLICYX|$TOKEN_METADATA_POLICY|g" "$STAGE/scripts/publish.sh"
 
 # Copy .gitignore verbatim
 cp "$TEMPLATE_GITIGNORE" "$STAGE/.gitignore"
@@ -262,7 +306,8 @@ fi
 cp "$TEMPLATE_README" "$STAGE/README.md"
 subst_tokens "$STAGE/README.md" "PACKAGENAME=$TOKEN_PACKAGE_NAME" "MODULENAME=$TOKEN_MODULE_NAME" \
     "STRUCTNAME=$TOKEN_STRUCT_NAME" "SYMBOL=$TOKEN_SYMBOL" "NAME=$TOKEN_NAME" \
-    "DESCRIPTION=$TOKEN_DESCRIPTION" "DECIMALS=$TOKEN_DECIMALS"
+    "DESCRIPTION=$TOKEN_DESCRIPTION" "DECIMALS=$TOKEN_DECIMALS" "INITIALSUPPLY=$TOKEN_INITIAL_SUPPLY" \
+    "SUPPLYPOLICY=$TOKEN_SUPPLY_POLICY" "METADATAPOLICY=$TOKEN_METADATA_POLICY"
 
 # The README License section matches the selected license. The template's licence line is matched
 # whatever licence the template itself ships with; the new line replaces it whole.
@@ -280,10 +325,12 @@ cp "$TEMPLATE_DEPLOYMENTS" "$STAGE/deployments.md"
 subst_tokens "$STAGE/deployments.md" "SYMBOL=$TOKEN_SYMBOL" "MODULENAME=$TOKEN_MODULE_NAME"
 cp "$TEMPLATE_CLAUDE" "$STAGE/CLAUDE.md"
 subst_tokens "$STAGE/CLAUDE.md" "PACKAGENAME=$TOKEN_PACKAGE_NAME" "MODULENAME=$TOKEN_MODULE_NAME" \
-    "STRUCTNAME=$TOKEN_STRUCT_NAME" "SYMBOL=$TOKEN_SYMBOL" "PROJECTNAME=$TOKEN_PROJECT_NAME"
+    "STRUCTNAME=$TOKEN_STRUCT_NAME" "SYMBOL=$TOKEN_SYMBOL" "PROJECTNAME=$TOKEN_PROJECT_NAME" \
+    "INITIALSUPPLY=$TOKEN_INITIAL_SUPPLY" "SUPPLYPOLICY=$TOKEN_SUPPLY_POLICY" "METADATAPOLICY=$TOKEN_METADATA_POLICY"
 cp "$TEMPLATE_AGENTS" "$STAGE/AGENTS.md"
 subst_tokens "$STAGE/AGENTS.md" "PACKAGENAME=$TOKEN_PACKAGE_NAME" "MODULENAME=$TOKEN_MODULE_NAME" \
-    "STRUCTNAME=$TOKEN_STRUCT_NAME" "SYMBOL=$TOKEN_SYMBOL" "PROJECTNAME=$TOKEN_PROJECT_NAME"
+    "STRUCTNAME=$TOKEN_STRUCT_NAME" "SYMBOL=$TOKEN_SYMBOL" "PROJECTNAME=$TOKEN_PROJECT_NAME" \
+    "INITIALSUPPLY=$TOKEN_INITIAL_SUPPLY" "SUPPLYPOLICY=$TOKEN_SUPPLY_POLICY" "METADATAPOLICY=$TOKEN_METADATA_POLICY"
 
 # Template source. The token-parameter constants have DISTINCT default lines (so the browser deployer can
 # patch them in the compiled bytecode); each is replaced as a whole line, so no value can collide with
@@ -305,6 +352,9 @@ set_line "$SRC" 'const SYMBOL: vector<u8> = b"TEMPLATE_SYMBOL";' "const SYMBOL: 
 set_line "$SRC" 'const NAME: vector<u8> = b"TEMPLATE_NAME";' "const NAME: vector<u8> = b\"${TOKEN_NAME}\";"
 set_line "$SRC" 'const DESCRIPTION: vector<u8> = b"TEMPLATE_DESCRIPTION";' "const DESCRIPTION: vector<u8> = b\"${TOKEN_DESCRIPTION}\";"
 set_line "$SRC" 'const ICON_URL: vector<u8> = b"TEMPLATE_ICON_URL";' "const ICON_URL: vector<u8> = b\"${TOKEN_ICON_URL}\";"
+set_line "$SRC" 'const INITIAL_SUPPLY: u64 = 1_000_000_007;' "const INITIAL_SUPPLY: u64 = ${RAW_SUPPLY};"
+set_line "$SRC" 'const FIXED_SUPPLY: bool = true;' "const FIXED_SUPPLY: bool = ${FIXED_SUPPLY_LITERAL};"
+set_line "$SRC" 'const FROZEN_METADATA: bool = false;' "const FROZEN_METADATA: bool = ${FROZEN_METADATA_LITERAL};"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Post-generation checks, all on the staging copy. A failure here leaves OUTPUT_DIR untouched.
@@ -332,7 +382,7 @@ fi
 echo "✓ Package generated successfully"
 echo ""
 echo "Generated constants (check these before publishing; they are permanent on-chain):"
-grep -E '^const (DECIMALS|SYMBOL|NAME|DESCRIPTION|ICON_URL):' "$OUT_ABS/sources/$TOKEN_MODULE_NAME.move" | sed 's/^/  /'
+grep -E '^const (DECIMALS|SYMBOL|NAME|DESCRIPTION|ICON_URL|INITIAL_SUPPLY|FIXED_SUPPLY|FROZEN_METADATA):' "$OUT_ABS/sources/$TOKEN_MODULE_NAME.move" | sed 's/^/  /'
 echo ""
 echo "Next steps:"
 echo "  1. Review changes: git diff $OUTPUT_DIR"

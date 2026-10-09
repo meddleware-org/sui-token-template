@@ -25,11 +25,15 @@ It does not cover:
 
 1. **One coin type per package, created once.** The one-time witness guarantees `init` runs exactly
    once; the template defines no mint/burn wrappers — supply is controlled solely by whoever holds
-   the `TreasuryCap`.
-2. **Both capabilities go to the publisher.** `init` transfers `TreasuryCap<T>` and `MetadataCap<T>`
-   to the transaction sender and nothing else; there is no hidden or retained authority.
+   the `TreasuryCap`, and a fixed supply has none.
+2. **The policies are applied by `init`, in the publish transaction.** With `FIXED_SUPPLY` the
+   `TreasuryCap` goes to the coin registry (`make_supply_fixed`); with `FROZEN_METADATA` the
+   `MetadataCap` is deleted. Whatever remains (the initial `Coin<T>`, a `TreasuryCap`, a
+   `MetadataCap`) goes to the transaction sender and nothing else; there is no hidden or retained
+   authority, and no later transaction in which a cap the deployer meant to give up exists.
 3. **Name, symbol and decimals are fixed forever** by the coin registry. Description and icon URL are
-   editable only by the `MetadataCap` holder (until it is deleted or frozen).
+   editable only by the `MetadataCap` holder (until it is deleted — `FROZEN_METADATA` — after which
+   they are fixed too). The registry reports both guarantees.
 4. **Immutability is explicit.** A generated package is immutable only once its `UpgradeCap` has been
    burned (`0x2::package::make_immutable`) — `deploy_token.sh` always burns it; the per-instance
    `scripts/publish.sh` burns it only with `--confirm-immutable` or an interactive `CONFIRM`, and

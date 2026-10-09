@@ -19,6 +19,11 @@ set -euo pipefail
 #   TREASURY_ADDRESS           governance multisig address (0x + 64 hex chars)
 #   NETWORK                    "testnet" or "mainnet"
 #
+# Optional (same meaning and validation as scripts/03_create_token.sh; applied by the coin's own init):
+#   TOKEN_INITIAL_SUPPLY       whole tokens minted at publish (default 0); sent to TREASURY_ADDRESS
+#   TOKEN_SUPPLY_POLICY        "mintable" (default; the TreasuryCap goes to TREASURY_ADDRESS) or "fixed"
+#   TOKEN_METADATA_POLICY      "updatable" (default; the MetadataCap stays with the deployer) or "frozen"
+#
 # Usage:
 #   TOKEN_PACKAGE_NAME=my_token TOKEN_MODULE_NAME=mytoken TOKEN_STRUCT_NAME=MYTOKEN \
 #   TOKEN_SYMBOL="myTOKEN" TOKEN_NAME="My Token" \
@@ -43,6 +48,11 @@ set -euo pipefail
 : "${OUTPUT_DIR:?OUTPUT_DIR must be set and non-empty}"
 : "${TREASURY_ADDRESS:?TREASURY_ADDRESS must be set and non-empty}"
 : "${NETWORK:?NETWORK must be set and non-empty}"
+
+# Optional policy (validated by 03_create_token.sh before anything is published). Normalise the supply
+# once so "007" and "7" mean the same everywhere below.
+TOKEN_INITIAL_SUPPLY="$(printf '%s' "${TOKEN_INITIAL_SUPPLY:-0}" | sed 's/^0*//')"
+TOKEN_INITIAL_SUPPLY="${TOKEN_INITIAL_SUPPLY:-0}"
 
 # Locate script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -95,6 +105,9 @@ TOKEN_DESCRIPTION="$TOKEN_DESCRIPTION" \
 TOKEN_PACKAGE_DESCRIPTION="$TOKEN_PACKAGE_DESCRIPTION" \
 TOKEN_PROJECT_NAME="$TOKEN_PROJECT_NAME" \
 TOKEN_DECIMALS="$TOKEN_DECIMALS" \
+TOKEN_INITIAL_SUPPLY="${TOKEN_INITIAL_SUPPLY:-0}" \
+TOKEN_SUPPLY_POLICY="${TOKEN_SUPPLY_POLICY:-mintable}" \
+TOKEN_METADATA_POLICY="${TOKEN_METADATA_POLICY:-updatable}" \
 bash "$SCRIPT_DIR/03_create_token.sh" --output-dir "$OUTPUT_DIR"
 
 echo ""
@@ -140,7 +153,7 @@ Please review the deployment configuration:
 EOF
 
 echo "  The constants compiled into the package (read from the generated source; permanent on-chain):"
-grep -E '^const (DECIMALS|SYMBOL|NAME|DESCRIPTION|ICON_URL):' "$OUTPUT_DIR/sources/$TOKEN_MODULE_NAME.move" | sed 's/^/    /'
+grep -E '^const (DECIMALS|SYMBOL|NAME|DESCRIPTION|ICON_URL|INITIAL_SUPPLY|FIXED_SUPPLY|FROZEN_METADATA):' "$OUTPUT_DIR/sources/$TOKEN_MODULE_NAME.move" | sed 's/^/    /'
 echo ""
 
 if [[ "$NETWORK" == "mainnet" && "${MAINNET_CONFIRM:-}" != "1" ]]; then
@@ -193,36 +206,52 @@ created_id() { # <exact objectType>
         '[.objectChanges[] | select(.type == "created" and .objectType == $t) | .objectId] | if length == 1 then .[0] else "" end'
 }
 TREASURY_CAP_ID=$(created_id "0x2::coin::TreasuryCap<${COIN_TYPE}>")
+INITIAL_COIN_ID=$(created_id "0x2::coin::Coin<${COIN_TYPE}>")
 UPGRADE_CAP_ID=$(created_id "0x2::package::UpgradeCap")
 record TOKEN_PACKAGE_ID "$PACKAGE_ID"
 record TOKEN_COIN_TYPE "$COIN_TYPE"
 
-if [[ -z "$TREASURY_CAP_ID" || "$TREASURY_CAP_ID" == "null" ]]; then
+# The coin's init applied the supply and metadata policy in the publish transaction, so what exists
+# follows the policy: a fixed supply has no TreasuryCap (the registry holds it), frozen metadata no
+# MetadataCap, and the initial supply is one Coin<T> owned by the deployer.
+SUPPLY_POLICY="${TOKEN_SUPPLY_POLICY:-mintable}"
+METADATA_POLICY="${TOKEN_METADATA_POLICY:-updatable}"
+if [[ "$SUPPLY_POLICY" == "mintable" && ( -z "$TREASURY_CAP_ID" || "$TREASURY_CAP_ID" == "null" ) ]]; then
     echo "ERROR: Could not find exactly one TreasuryCap<$COIN_TYPE> in the publish output (the package IS published: see $ENV_RECORD)" >&2
+    exit 1
+fi
+if [[ "$SUPPLY_POLICY" == "fixed" && -n "$TREASURY_CAP_ID" ]]; then
+    echo "ERROR: the supply policy is fixed, but a TreasuryCap<$COIN_TYPE> exists (the package IS published: see $ENV_RECORD)" >&2
+    exit 1
+fi
+if [[ "${TOKEN_INITIAL_SUPPLY:-0}" != "0" && -z "$INITIAL_COIN_ID" ]]; then
+    echo "ERROR: an initial supply was requested but no Coin<$COIN_TYPE> was created (the package IS published: see $ENV_RECORD)" >&2
     exit 1
 fi
 if [[ -z "$UPGRADE_CAP_ID" || "$UPGRADE_CAP_ID" == "null" ]]; then
     echo "ERROR: Could not find exactly one UpgradeCap in the publish output (the package IS published: see $ENV_RECORD)" >&2
     exit 1
 fi
-record TOKEN_TREASURY_CAP_ID "$TREASURY_CAP_ID"
+[[ -z "$TREASURY_CAP_ID" ]] || record TOKEN_TREASURY_CAP_ID "$TREASURY_CAP_ID"
+[[ -z "$INITIAL_COIN_ID" ]] || record TOKEN_INITIAL_COIN_ID "$INITIAL_COIN_ID"
 record TOKEN_UPGRADE_CAP_ID "$UPGRADE_CAP_ID"
 METADATA_CAP_ID=$(echo "$PUBLISH_OUTPUT" | jq -r --arg t "::coin_registry::MetadataCap<${COIN_TYPE}>" \
     '[.objectChanges[] | select(.type == "created" and (.objectType | endswith($t))) | .objectId] | .[0] // empty')
 PENDING_CURRENCY_ID=$(echo "$PUBLISH_OUTPUT" | jq -r --arg t "::coin_registry::Currency<${COIN_TYPE}>" \
     '[.objectChanges[] | select(.type == "created" and (.objectType | endswith($t))) | .objectId] | .[0] // empty')
 
-if [[ -z "$METADATA_CAP_ID" || -z "$PENDING_CURRENCY_ID" ]]; then
+if [[ -z "$PENDING_CURRENCY_ID" || ( "$METADATA_POLICY" != "frozen" && -z "$METADATA_CAP_ID" ) ]]; then
     echo "ERROR: Could not parse MetadataCap / pending Currency object IDs from publish output (the package IS published: see $ENV_RECORD)" >&2
     exit 1
 fi
-record TOKEN_METADATA_CAP_ID "$METADATA_CAP_ID"
+[[ -z "$METADATA_CAP_ID" ]] || record TOKEN_METADATA_CAP_ID "$METADATA_CAP_ID"
 record TOKEN_PENDING_CURRENCY_ID "$PENDING_CURRENCY_ID"
 
 echo ""
 echo "  Package ID:        $PACKAGE_ID"
-echo "  TreasuryCap ID:    $TREASURY_CAP_ID"
-echo "  MetadataCap ID:    $METADATA_CAP_ID"
+echo "  TreasuryCap ID:    ${TREASURY_CAP_ID:-<none: fixed supply, held by the registry>}"
+echo "  MetadataCap ID:    ${METADATA_CAP_ID:-<none: metadata frozen>}"
+echo "  Initial supply:    ${INITIAL_COIN_ID:-<none>}"
 echo "  Pending Currency:  $PENDING_CURRENCY_ID"
 echo "  UpgradeCap ID:     $UPGRADE_CAP_ID"
 echo ""
@@ -296,41 +325,54 @@ fi
 echo ""
 
 # ============================================================================
-# Phase 7: Transfer TreasuryCap
+# Phase 7: Hand over the supply authority
 # ============================================================================
+# What there is to hand over follows the supply policy: a mintable coin has a TreasuryCap (authority to
+# mint), and an initial supply is a Coin<T>. A fixed supply has no TreasuryCap at all (the registry holds
+# the supply), only the minted coin.
 
-echo "=== Phase 7: Transfer TreasuryCap ==="
+echo "=== Phase 7: Hand over the supply authority ==="
 echo ""
-echo "  TreasuryCap $TREASURY_CAP_ID  ->  $TREASURY_ADDRESS"
-echo "  This hands over the authority to mint supply, and cannot be undone."
-# The earlier confirmations do not cover this irreversible step: name the address and ask again.
-if [[ "$NETWORK" == "mainnet" ]]; then
-    read -rp "Type the first 10 characters of the treasury address (${TREASURY_ADDRESS:0:10}) to transfer: " TRANSFER_CONFIRMATION
-    [[ "$TRANSFER_CONFIRMATION" == "${TREASURY_ADDRESS:0:10}" ]] || { echo "Transfer declined. The TreasuryCap stays with the deployer ($TREASURY_CAP_ID)." >&2; exit 1; }
+
+HANDOVER_IDS=()
+[[ -z "$TREASURY_CAP_ID" ]] || HANDOVER_IDS+=("$TREASURY_CAP_ID")
+[[ -z "$INITIAL_COIN_ID" ]] || HANDOVER_IDS+=("$INITIAL_COIN_ID")
+
+if [[ ${#HANDOVER_IDS[@]} -eq 0 ]]; then
+    echo "Nothing to hand over: no TreasuryCap (fixed supply) and no initial supply."
 else
-    read -rp "Type TRANSFER to send the TreasuryCap to $TREASURY_ADDRESS: " TRANSFER_CONFIRMATION
-    [[ "$TRANSFER_CONFIRMATION" == "TRANSFER" ]] || { echo "Transfer declined. The TreasuryCap stays with the deployer ($TREASURY_CAP_ID)." >&2; exit 1; }
-fi
+    [[ -z "$TREASURY_CAP_ID" ]] || echo "  TreasuryCap $TREASURY_CAP_ID  ->  $TREASURY_ADDRESS  (authority to mint supply)"
+    [[ -z "$INITIAL_COIN_ID" ]] || echo "  Initial supply Coin $INITIAL_COIN_ID  ->  $TREASURY_ADDRESS  (the whole minted supply)"
+    echo "  This cannot be undone."
+    # The earlier confirmations do not cover this irreversible step: name the address and ask again.
+    if [[ "$NETWORK" == "mainnet" ]]; then
+        read -rp "Type the first 10 characters of the treasury address (${TREASURY_ADDRESS:0:10}) to transfer: " TRANSFER_CONFIRMATION
+        [[ "$TRANSFER_CONFIRMATION" == "${TREASURY_ADDRESS:0:10}" ]] || { echo "Transfer declined. Both stay with the deployer (${HANDOVER_IDS[*]})." >&2; exit 1; }
+    else
+        read -rp "Type TRANSFER to send them to $TREASURY_ADDRESS: " TRANSFER_CONFIRMATION
+        [[ "$TRANSFER_CONFIRMATION" == "TRANSFER" ]] || { echo "Transfer declined. They stay with the deployer (${HANDOVER_IDS[*]})." >&2; exit 1; }
+    fi
 
-if ! sui client transfer --object-id "$TREASURY_CAP_ID" \
-       --to "$TREASURY_ADDRESS" --gas-budget 10000000; then
-    echo "ERROR: TreasuryCap transfer FAILED." >&2
-    echo "Package was published. TreasuryCap has NOT been transferred." >&2
-    echo "TreasuryCap object ID: $TREASURY_CAP_ID" >&2
-    echo "Manual recovery:" >&2
-    echo "  sui client transfer --object-id $TREASURY_CAP_ID \\" >&2
-    echo "    --to $TREASURY_ADDRESS --gas-budget 10000000" >&2
-    exit 1
+    for OBJ_ID in "${HANDOVER_IDS[@]}"; do
+        if ! sui client transfer --object-id "$OBJ_ID" \
+               --to "$TREASURY_ADDRESS" --gas-budget 10000000; then
+            echo "ERROR: transfer of $OBJ_ID FAILED." >&2
+            echo "Package was published. $OBJ_ID has NOT been transferred." >&2
+            echo "Manual recovery:" >&2
+            echo "  sui client transfer --object-id $OBJ_ID \\" >&2
+            echo "    --to $TREASURY_ADDRESS --gas-budget 10000000" >&2
+            exit 1
+        fi
+        # Re-read the owner: the transfer counts only if the chain says so.
+        NEW_OWNER=$(sui client object "$OBJ_ID" --json 2>/dev/null | jq -r '.owner.AddressOwner // empty')
+        if [[ "${NEW_OWNER,,}" != "${TREASURY_ADDRESS,,}" ]]; then
+            echo "ERROR: $OBJ_ID is owned by '${NEW_OWNER:-<unknown>}' after the transfer, not $TREASURY_ADDRESS." >&2
+            exit 1
+        fi
+        if [[ "$OBJ_ID" == "$TREASURY_CAP_ID" ]]; then record TOKEN_TREASURY_CAP_OWNER "$NEW_OWNER"; else record TOKEN_INITIAL_COIN_OWNER "$NEW_OWNER"; fi
+        echo "$OBJ_ID transferred to $TREASURY_ADDRESS (verified on-chain)"
+    done
 fi
-
-# Re-read the owner: the transfer counts only if the chain says so.
-NEW_OWNER=$(sui client object "$TREASURY_CAP_ID" --json 2>/dev/null | jq -r '.owner.AddressOwner // empty')
-if [[ "${NEW_OWNER,,}" != "${TREASURY_ADDRESS,,}" ]]; then
-    echo "ERROR: TreasuryCap $TREASURY_CAP_ID is owned by '${NEW_OWNER:-<unknown>}' after the transfer, not $TREASURY_ADDRESS." >&2
-    exit 1
-fi
-record TOKEN_TREASURY_CAP_OWNER "$NEW_OWNER"
-echo "TreasuryCap transferred to $TREASURY_ADDRESS (verified on-chain)"
 echo ""
 
 # ============================================================================
@@ -345,8 +387,11 @@ Deployment complete!
 
 Network:            $NETWORK
 Package ID:         $PACKAGE_ID
-TreasuryCap ID:     $TREASURY_CAP_ID (transferred to $TREASURY_ADDRESS)
-MetadataCap ID:     $METADATA_CAP_ID (retained by the deployer — can change description/icon)
+Supply policy:      $SUPPLY_POLICY (initial supply: $TOKEN_INITIAL_SUPPLY whole tokens)
+TreasuryCap ID:     ${TREASURY_CAP_ID:-<none: the supply is fixed and recorded in the registry>}${TREASURY_CAP_ID:+ (transferred to $TREASURY_ADDRESS)}
+Initial supply:     ${INITIAL_COIN_ID:-<none>}${INITIAL_COIN_ID:+ (transferred to $TREASURY_ADDRESS)}
+Metadata policy:    $METADATA_POLICY
+MetadataCap ID:     ${METADATA_CAP_ID:-<none: metadata is frozen and recorded in the registry>}${METADATA_CAP_ID:+ (retained by the deployer — can change description/icon)}
 Currency ID:        ${CURRENCY_ID:-<see finalize transaction>} (shared, registry-discoverable)
 UpgradeCap ID:      $UPGRADE_CAP_ID (burned — package is immutable)
 Blob ID:            $BLOB_ID

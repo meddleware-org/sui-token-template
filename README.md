@@ -51,7 +51,7 @@ This automatically:
 - Generates the token package with the Walrus icon URL
 - Tests and builds locally
 - Publishes to mainnet
-- Transfers the `TreasuryCap` to your governance multisig
+- Transfers the `TreasuryCap` (if the supply is mintable) and the initial supply to your governance multisig
 
 ---
 
@@ -246,12 +246,12 @@ The script runs 8 phases, each with clear output and error handling:
 #### Phase 6: Publish
 
 - Runs `sui client publish "$OUTPUT_DIR" --gas-budget 100000000 --json`.
-- Parses package ID and TreasuryCap object ID from JSON output.
-- Aborts if either cannot be parsed.
+- Parses the package ID and the objects `init` created from the JSON output: the TreasuryCap (none for a fixed supply), the initial supply `Coin<T>` (none for a zero supply), the MetadataCap (none for frozen metadata), the pending Currency and the UpgradeCap.
+- Aborts if what exists does not match the chosen policy.
 
-#### Phase 7: Transfer TreasuryCap
+#### Phase 7: Hand over the supply authority
 
-- Runs `sui client transfer --object-id $TREASURY_CAP_ID --to $TREASURY_ADDRESS --gas-budget 10000000`.
+- Runs `sui client transfer --object-id <id> --to $TREASURY_ADDRESS --gas-budget 10000000` for the TreasuryCap (if one exists) and for the initial supply coin (if one exists), after one typed confirmation, and re-reads each owner from the chain.
 - **Critical error handling:** If transfer fails after successful publish, prints:
   - Error message
   - TreasuryCap object ID
@@ -318,31 +318,31 @@ The template uses the **one-time-witness (OTW) pattern** for type identity and t
 module sui_token_template::sui_token_template;
 
 use sui::coin::TreasuryCap;
-use sui::coin_registry::{Self, Currency, MetadataCap};
+use sui::coin_registry;
 
 // Type witness: zero-sized struct with drop ability only.
 // Consumed once in init(); burned by the coin registry.
 public struct SUI_TOKEN_TEMPLATE has drop {}
 
 fun init(witness: SUI_TOKEN_TEMPLATE, ctx: &mut TxContext) {
-    // Register token with the coin registry; returns a Currency builder and TreasuryCap.
-    let (builder, treasury_cap) = coin_registry::new_currency_with_otw(
-        witness,
-        0u8,                           // decimals placeholder
-        b"TEMPLATE".to_string(),       // symbol placeholder
-        b"TEMPLATE".to_string(),       // name placeholder
-        b"TEMPLATE".to_string(),       // description placeholder
-        b"TEMPLATE".to_string(),       // icon URL placeholder
-        ctx,
+    // (abridged: init delegates to init_with(INITIAL_SUPPLY, FIXED_SUPPLY, FROZEN_METADATA))
+    let (mut builder, mut treasury_cap) = coin_registry::new_currency_with_otw(
+        witness, DECIMALS, SYMBOL.to_string(), NAME.to_string(),
+        DESCRIPTION.to_string(), ICON_URL.to_string(), ctx,
     );
 
-    // finalize() (NOT finalize_and_delete_metadata_cap): name/symbol/decimals stay
-    // immutable, but description + icon remain governance-updatable via the MetadataCap.
-    let metadata_cap = builder.finalize(ctx);
+    // The initial supply goes to the deployer.
+    if (INITIAL_SUPPLY > 0) transfer::public_transfer(treasury_cap.mint(INITIAL_SUPPLY, ctx), ctx.sender());
 
-    // Transfer both the TreasuryCap and the MetadataCap to the deployer.
-    transfer::public_transfer(treasury_cap, ctx.sender());
-    transfer::public_transfer(metadata_cap, ctx.sender());
+    // FIXED_SUPPLY: the registry takes the TreasuryCap (aborts if nothing was minted), so the supply
+    // can never grow and the registry reports it. Otherwise the deployer keeps the TreasuryCap.
+    if (FIXED_SUPPLY) builder.make_supply_fixed(treasury_cap)
+    else transfer::public_transfer(treasury_cap, ctx.sender());
+
+    // FROZEN_METADATA: the MetadataCap is deleted (nothing can ever change). Otherwise the deployer
+    // keeps it and description + icon remain governance-updatable.
+    if (FROZEN_METADATA) builder.finalize_and_delete_metadata_cap(ctx)
+    else transfer::public_transfer(builder.finalize(ctx), ctx.sender());
 }
 
 // Test helpers...
@@ -352,12 +352,15 @@ fun init(witness: SUI_TOKEN_TEMPLATE, ctx: &mut TxContext) {
 
 #### 1. Immutable Metadata by Design
 
-`init()` registers the coin with `coin_registry::new_currency_with_otw` and transfers **both** the
-`TreasuryCap` and the `MetadataCap` to the publisher. **Name, symbol and decimals are fixed forever**
-by the coin registry. **Description and icon URL remain editable by whoever holds the
-`MetadataCap`** until that cap is deleted (`coin_registry::delete_metadata_cap`) or frozen. Decide
-the `MetadataCap` custody explicitly at deployment (keep for icon updates, move to governance, or
-lock) — see the audit's capability matrix.
+`init()` registers the coin with `coin_registry::new_currency_with_otw`, mints the initial supply and
+applies the deployer's policies **in the publish transaction**. **Name, symbol and decimals are fixed
+forever** by the coin registry. With a **fixed supply** the registry takes the `TreasuryCap`
+(`make_supply_fixed`); with **frozen metadata** the `MetadataCap` is deleted. Both are recorded in
+the registry (`is_supply_fixed`, `is_metadata_cap_deleted`), so wallets and indexers can show them.
+Otherwise the publisher keeps the `TreasuryCap` / `MetadataCap` (**description and icon URL remain
+editable by whoever holds the `MetadataCap`**) and decides their custody at deployment — see the
+audit's capability matrix. The policy is chosen when the package is generated
+(`TOKEN_INITIAL_SUPPLY`, `TOKEN_SUPPLY_POLICY`, `TOKEN_METADATA_POLICY`).
 
 #### 2. One-Time Witness Pattern
 
@@ -506,12 +509,12 @@ The icon URL is **immutable on-chain**, so choose it carefully before mainnet de
 
 ### Unit Tests (Included)
 
-The template includes four test functions that verify:
-
-1. `test_treasury_cap_transferred_to_sender` — TreasuryCap is owned by the deployer after `init()`.
-2. `test_treasury_cap_present_in_sender` — TreasuryCap is present after `init()`.
-3. `test_metadata_cap_present_in_sender` — MetadataCap is present after `init()` (metadata stays governance-updatable).
-4. `test_currency_transferred_to_registry_after_init` — Currency is transferred to the registry address, pending `finalize_registration`.
+The template includes six tests covering every policy combination: whatever constants the package was
+generated with (checked against the registry), a mintable supply (TreasuryCap with the mint already counted),
+a mintable supply with no initial supply, frozen metadata (no MetadataCap; the registry records the
+deletion), mintable-and-updatable (both caps with the deployer), and the abort when a fixed supply has
+nothing minted. The registry's `Currency` is read back to check `is_supply_fixed`, `total_supply` and
+`is_metadata_cap_deleted`.
 
 **Run template tests:**
 

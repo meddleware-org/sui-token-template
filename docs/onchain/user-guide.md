@@ -18,16 +18,16 @@ explains what that coin can do afterwards, who controls it, and the choices that
 
 | You hold… | You can… | You can give it up by… |
 | --- | --- | --- |
-| the **TreasuryCap** | mint new coins and burn coins you own | choosing *fixed supply* (the cap is frozen after the initial mint — nobody can ever mint again) |
-| the **MetadataCap** | change the description and icon | choosing *frozen metadata* (the cap is frozen — nobody can change them again) |
+| the **TreasuryCap** | mint new coins and burn coins you own | choosing *fixed supply* (the whole supply is minted when the coin is created and the registry takes the cap — nobody can ever mint again, and wallets can see that) |
+| the **MetadataCap** | change the description and icon | choosing *frozen metadata* (the cap is deleted when the coin is created — nobody can change them again, and wallets can see that) |
 
 Whoever holds a capability has that power — keep it in a wallet you control, or give it up
 deliberately. Sending a capability to someone else transfers the power with it.
 
 ## Things to know
 
-- **Fixed supply is final.** After choosing it you can never mint more, even if you made a mistake
-  in the initial amount.
+- **Fixed supply is final.** It needs an initial supply above zero, and after choosing it you can
+  never mint more, even if you made a mistake in the initial amount.
 - **Icon URLs point to files hosted elsewhere** (for example on Walrus). If that file expires or is
   removed, wallets show a broken icon; keep the storage alive or update the icon while you still
   hold the MetadataCap.

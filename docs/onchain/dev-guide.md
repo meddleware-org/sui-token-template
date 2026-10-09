@@ -12,12 +12,17 @@ integrate with the resulting coin. See the [API reference](api-reference.md) for
 1. **`finalize_registration` MUST run after publish.** Until it does, `Currency<T>` is pending
    (owned by `0xc`) and wallets/indexers cannot resolve the coin. Anyone may call it:
    `0x2::coin_registry::finalize_registration<T>(0xc registry, pending Currency)`.
-2. **Capability custody MUST be decided explicitly at deploy time** — `TreasuryCap` (supply) and
-   `MetadataCap` (description/icon) both land with the publisher.
+2. **Supply and metadata policy MUST be decided at generation time** — `INITIAL_SUPPLY`,
+   `FIXED_SUPPLY` and `FROZEN_METADATA` are compiled constants, applied by `init` in the publish
+   transaction. A fixed supply leaves no `TreasuryCap` and frozen metadata no `MetadataCap`; every
+   cap and coin that does exist lands with the publisher, whose custody MUST be decided explicitly.
+   The registry records both guarantees (`is_supply_fixed`, `is_metadata_cap_deleted`).
 3. **Immutability MUST be verified by the UpgradeCap being consumed**, not by the package object's
    owner (a package is always `Immutable`-owned).
 4. **Generators MUST patch only the designated constants.** The distinct placeholder constants
-   (`TEMPLATE_SYMBOL`, `TEMPLATE_NAME`, `TEMPLATE_DESCRIPTION`, `TEMPLATE_ICON_URL`, `DECIMALS = 9`)
+   (`TEMPLATE_SYMBOL`, `TEMPLATE_NAME`, `TEMPLATE_DESCRIPTION`, `TEMPLATE_ICON_URL`, `DECIMALS = 9`,
+   `INITIAL_SUPPLY = 1_000_000_007`, `FIXED_SUPPLY = true`, `FROZEN_METADATA = false` — the two
+   booleans differ so each keeps its own pool entry)
    and the identifiers `sui_token_template` / `SUI_TOKEN_TEMPLATE` are the contract with
    `@meddleware/token-deployer-ui` (bytecode patching via `@mysten/move-bytecode-template`) and
    `scripts/03_create_token.sh` (source generation). Renaming or merging them breaks both.
@@ -47,5 +52,5 @@ Each step saves IDs to `.env.<network>`; re-running resumes (no second publish).
 
 - Balances and transfers use the standard `Coin<T>` / address-balance APIs — nothing custom.
 - Metadata: `client.getCoinMetadata({ coinType })` (gRPC) returns the registry `Currency`.
-- Minting (`0x2::coin::mint`) and burning (`0x2::coin::burn`) require the `TreasuryCap`; a frozen
-  `TreasuryCap` means supply is permanently fixed.
+- Minting (`0x2::coin::mint`) and burning (`0x2::coin::burn`) require the `TreasuryCap`. A coin with
+  a fixed supply has none: `Currency<T>` reports `is_supply_fixed` and `total_supply` instead.
