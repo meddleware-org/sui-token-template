@@ -23,7 +23,7 @@ uses the `walrus` CLI; noted under OPS), AUTH, IMG (no image), SITE.
 
 - `sui_token_template` — `Move.toml` `version = "1.0.0"`, npm `@meddleware/sui-token-template`
   **1.0.8** (tag `v1.0.8` = `5451c0e`, 2026-10-09; SLSA v1 provenance, registry `latest`); the
-  2026-10-10 fix wave is **1.0.9** (commit pending; released by the orchestrator).
+  2026-10-10 fix wave is **1.0.9** (commit `1faa903`; released by the orchestrator).
 - Edition 2024.
 - Framework pinned by the committed `Move.lock` (rev `83f11dc8…b059`, unchanged since 1.0.6).
 - Shipped bytecode `bytecode/sui_token_template.mv` (`moduleSha256 96298cca…9630`, 931 bytes,
@@ -59,7 +59,7 @@ uses the `walrus` CLI; noted under OPS), AUTH, IMG (no image), SITE.
 - Realised ceiling at the 2026-10-09 pass: **Low** (F21 and F22). Both are RESOLVED in 1.0.9 (commit
   pending), as is F14, the 2026-10-03 Medium; no finding above Info is open.
 
-**Status:** re-verified 2026-10-09 at `5451c0e` (tag `v1.0.8`); fix wave 2026-10-10 (1.0.9, commit pending)
+**Status:** re-verified 2026-10-09 at `5451c0e` (tag `v1.0.8`); fix wave 2026-10-10 (1.0.9, commit `1faa903`)
 closes F21, F22, F23 and F24 and mitigates F7.
 
 - Two releases have landed since the third pass: 1.0.7 (`7d9c04b`: generator validates and stages,
@@ -112,7 +112,7 @@ registry.** Every finding from the third pass is closed except two residual Info
   the burn is verified by the `UpgradeCap` no longer existing, and every ID goes to
   `.env.<network>` as it appears (a second run refuses to publish a second coin).
 
-**Closed by the 2026-10-10 fix wave (1.0.9, commit pending):**
+**Closed by the 2026-10-10 fix wave (1.0.9, commit `1faa903`):**
 
 - **F21 (Low) — RESOLVED.** The `deploy_token.sh` summary reports the recorded `UpgradeCap` state
   (`burned — package is immutable`, or `NOT burned — kept by the deployer` with a warning and the burn
@@ -355,7 +355,7 @@ policy itself, in the publish transaction.
 
 ### F7 — Framework revision not pinned
 
-**Severity:** Info   **Disposition:** MITIGATED — 1.0.9 (commit pending) for the npm package and the CLI
+**Severity:** Info   **Disposition:** MITIGATED — 1.0.9 (commit `1faa903`) for the npm package and the CLI
 generator; the sui-token-client-rendered packages are blocked by sui-token-client (it must carry the
 shipped `Move.lock` into the files it renders). Gate: pre-mainnet, before the first mainnet coin is
 generated from a release (Section D); the shipped artefact itself is pinned and reproducible
@@ -380,7 +380,7 @@ copies one. The shipped bytecode is still checked byte for byte in CI (`--check`
 concerns only source verification of coins generated from the source package. It stays a pre-mainnet
 gate item (Section D) rather than a defect of the artefact.
 
-**Fixed for the template side, 2026-10-10 (1.0.9, commit pending):** one best-practice fix exists (commit
+**Fixed for the template side, 2026-10-10 (1.0.9, commit `1faa903`):** one best-practice fix exists (commit
 the lock beside the manifest and keep it with the package), so it was applied.
 
 - `Move.lock` is in `package.json` `files` (`npm pack --dry-run`: 34 files, 62.6 kB, `Move.lock` listed).
@@ -774,7 +774,7 @@ written.
 
 ### F21 — `deploy_token.sh` summary says the `UpgradeCap` was burned even when the operator declined `BURN`
 
-**Severity:** Low   **Disposition:** RESOLVED — 1.0.9, commit pending (gate: pre-mainnet, Section D; the
+**Severity:** Low   **Disposition:** RESOLVED — 1.0.9, commit `1faa903` (gate: pre-mainnet, Section D; the
 shell pipeline's future is OQ7)
 **Where:** `scripts/deploy_token.sh:299-304` (the declined branch) and `:396` (the summary heredoc).
 **Issue:** declining `BURN` keeps the `UpgradeCap` and prints the manual burn command, but the run
@@ -788,7 +788,7 @@ output defect, not a missing control (the typed `BURN` and the verification both
 only when `TOKEN_UPGRADE_CAP_BURNED=yes`, otherwise `kept by the deployer — still upgradeable`), and add
 a harness case. Found while re-verifying F17 on 2026-10-09 by reading the script; not exercised live (S1).
 
-**Resolved (2026-10-10, 1.0.9, commit pending):** phase 6b sets `UPGRADE_CAP_BURNED=no` and flips it to
+**Resolved (2026-10-10, 1.0.9, commit `1faa903`):** phase 6b sets `UPGRADE_CAP_BURNED=no` and flips it to
 `yes` only after the burn is verified; the summary line reads `UpgradeCap ID: <id> (burned — package is
 immutable)` or `(NOT burned — kept by the deployer; the package is still upgradeable)`, and an unburned
 run also prints a warning with the `make_immutable` command. Pinned by `tests/generator.test.sh` cases
@@ -798,7 +798,7 @@ says burned and the record is written). Still not run live (S1).
 
 ### F22 — The burn checks treat any CLI failure as "the object is gone"
 
-**Severity:** Low   **Disposition:** RESOLVED — 1.0.9, commit pending (gate: pre-mainnet, Section D)
+**Severity:** Low   **Disposition:** RESOLVED — 1.0.9, commit `1faa903` (gate: pre-mainnet, Section D)
 **Where:** `templates/publish.sh:86-88` (`is_object_exists`, used at `:227` and `:234`) and
 `scripts/deploy_token.sh:317-318`.
 **Issue:** both checks read the result of `sui client object <UpgradeCap> --json` as "exists" or
@@ -814,7 +814,7 @@ lookup, so the severity stays Low.
 `NOT_FOUND` status) as consumed, and fail with the CLI output on any other error. Add a stubbed-CLI case
 to `tests/generator.test.sh`.
 
-**Resolved (2026-10-10, 1.0.9, commit pending):** one `object_state <id>` block, identical in
+**Resolved (2026-10-10, 1.0.9, commit `1faa903`):** one `object_state <id>` block, identical in
 `scripts/deploy_token.sh` and `templates/publish.sh` (the test compares them), prints `found`, `gone` or
 `unknown`.
 
@@ -838,7 +838,7 @@ to `tests/generator.test.sh`.
 
 ### F23 — Two documentation leftovers: a stale `CLAUDE.md` and an unwritten `exports` contract
 
-**Severity:** Info   **Disposition:** RESOLVED — 1.0.9, commit pending (gate: pre-mainnet, Section D —
+**Severity:** Info   **Disposition:** RESOLVED — 1.0.9, commit `1faa903` (gate: pre-mainnet, Section D —
 documentation matches the code)
 **Where:** `CLAUDE.md:70` and `:283` (and the file tree around them); `package.json` `exports`.
 **Issue:**
@@ -856,7 +856,7 @@ could break the client's generation, though the client's `check:template` would 
 **Remediation / evidence:** correct the file tree and the test list, and state the layout contract (which
 paths consumers may read) in the README. No code change.
 
-**Resolved (2026-10-10, 1.0.9, commit pending):** `CLAUDE.md` now has the real file tree (no
+**Resolved (2026-10-10, 1.0.9, commit `1faa903`):** `CLAUDE.md` now has the real file tree (no
 `scripts/publish.sh`; `templates/publish.sh` is the source of the generated one), the six current test
 names, the 6a / 6b / 7 / 8 phase numbering of `deploy_token.sh`, the burn-verification rule and the lock.
 The README has a "Package layout contract" section (`exports` = `package.json` and `bytecode/*`; the other
@@ -865,7 +865,7 @@ invariant 4 no longer says `deploy_token.sh` always burns.
 
 ### F24 — No `npm audit` step in CI or in the publish workflow
 
-**Severity:** Info   **Disposition:** RESOLVED — 1.0.9, commit pending (trivial and passing, so the
+**Severity:** Info   **Disposition:** RESOLVED — 1.0.9, commit `1faa903` (trivial and passing, so the
 step was added although the tree is empty; was ACCEPTED-RISK)
 **Where:** `.github/workflows/move-ci.yml`, `npm-publish.yml`; `package-lock.json`.
 **Issue:** `AUDIT_TEMPLATE_TS.md` B.TS-3 / TS-M8 require `npm audit --audit-level=high` in CI and in
@@ -878,7 +878,7 @@ is also no install-time code (no lifecycle script, `overrides` or `allowScripts`
 (npm and Actions, grouped weekly) already watches the manifest. Everything else in B.TS-3 holds: lockfile
 committed, `npm ci` in the publish job, npm pinned to `11.20.0`, OIDC with provenance.
 
-**Resolved (2026-10-10, 1.0.9, commit pending):** `.github/workflows/move-ci.yml` has an `npm-audit` job
+**Resolved (2026-10-10, 1.0.9, commit `1faa903`):** `.github/workflows/move-ci.yml` has an `npm-audit` job
 (`npm audit --audit-level=high`, pinned checkout and setup-node). The publish workflow's `verify` job is
 that workflow, so a tag is gated on it too. Local run: `found 0 vulnerabilities`.
 
@@ -995,7 +995,7 @@ by-hand human record. No chain-signing job runs in CI.
 
 Counts at 2026-10-09 (`5451c0e`): `sui move test --build-env testnet` **6 passed**; `bash
 tests/generator.test.sh` **38 passed, 0 failed**; `build-bytecode.sh --check` matches; shellcheck runs in CI
-only. Counts at 2026-10-10 (1.0.9, commit pending): 6 passed; **67 passed, 0 failed**; `--check` matches
+only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 failed**; `--check` matches
 (`96298cca…`, unchanged); shellcheck 0.11.0 clean on `scripts/*.sh templates/*.sh` and
 `-S warning tests/*.sh`.
 
@@ -1036,11 +1036,11 @@ only. Counts at 2026-10-10 (1.0.9, commit pending): 6 passed; **67 passed, 0 fai
 - [x] TreasuryCap transfer separately confirmed; burn verified; IDs persisted — F17 (RESOLVED 1.0.7)
 - [x] registry-recorded supply and metadata policy — F6 (RESOLVED 1.0.8)
 - [x] `deploy_token.sh` reports the `UpgradeCap` state truthfully and treats only "not found" as consumed
-  — F21, F22 (RESOLVED 1.0.9, commit pending; `tests/generator.test.sh`, stub-CLI cases)
+  — F21, F22 (RESOLVED 1.0.9, commit `1faa903`; `tests/generator.test.sh`, stub-CLI cases)
 - [x] `CLAUDE.md` and the README match the code, including the `exports` layout contract — F23 (RESOLVED
-  1.0.9, commit pending)
+  1.0.9, commit `1faa903`)
 - [ ] documented custody for `TreasuryCap` / `MetadataCap` per token (OQ2) — maintainer decision
-- [ ] `Move.lock` shipped and carried into generated packages — F7 (MITIGATED 1.0.9, commit pending: shipped
+- [ ] `Move.lock` shipped and carried into generated packages — F7 (MITIGATED 1.0.9, commit `1faa903`: shipped
   in npm and carried by `03_create_token.sh`; open for sui-token-client-rendered packages — blocked by
   sui-token-client; before the first mainnet coin from a release)
 - [ ] external audit of the template and generators — maintainer item (mainnet)
@@ -1228,7 +1228,7 @@ only. Counts at 2026-10-10 (1.0.9, commit pending): 6 passed; **67 passed, 0 fai
   - **Decided:** OQ3 (apply in `init`), OQ6 (shell port of the rules). OQ2, OQ5, OQ7 remain open.
   - **Not run:** `deploy_token.sh` on testnet (funded keystore and WAL; S1) and shellcheck (not installed
     here; green in CI).
-- 2026-10-10 (fix wave) — 1.0.9, commit pending (release by the orchestrator).
+- 2026-10-10 (fix wave) — 1.0.9, commit `1faa903` (release by the orchestrator).
   - **Resolved:** F21 (summary reports the recorded `UpgradeCap` state), F22 (`object_state`: only a
     definite not-found counts as consumed; both scripts), F23 (`CLAUDE.md` corrected, layout contract in the
     README), F24 (`npm audit --audit-level=high` job in `move-ci.yml`).
