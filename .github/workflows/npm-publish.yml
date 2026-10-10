@@ -2,7 +2,7 @@ name: Publish (npm)
 
 # Publishes the package to npmjs on a v* tag. Publication is gated on a
 # `verify` job that runs the same workflow as CI (Move build and tests, the shipped bytecode check, shellcheck of
-# the scripts) on the exact tagged commit, so a broken tag never ships.
+# the scripts, the generator and burn-reporting tests, npm audit) on the exact tagged commit, so a broken tag never ships.
 # Authentication uses npm OIDC trusted publishing — no long-lived NPM_TOKEN.
 
 on:

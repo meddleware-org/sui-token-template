@@ -62,27 +62,34 @@ This ensures:
 ```text
 .
 ├── Move.toml                    # Template package manifest
+├── Move.lock                    # Framework pin; shipped, and copied into generated packages
 ├── sources/
 │   └── sui_token_template.move       # Template source with inline tests
 ├── scripts/
+│   ├── 01_preflight.sh          # Deploy pipeline phase 1
+│   ├── 02_upload_image.sh       # Deploy pipeline phase 2 (Walrus)
 │   ├── 03_create_token.sh       # Generator: template → concrete instance
 │   ├── deploy_token.sh          # Full deployment pipeline
-│   └── publish.sh               # Simple build + publish wrapper
-├── templates/
+│   └── build-bytecode.sh        # Rebuild / --check the shipped bytecode
+├── templates/                   # Source of the generated files (the template itself has no scripts/publish.sh)
 │   ├── gitignore                # Copied as .gitignore into generated packages (no Move.lock entry)
-│   ├── publish.sh               # Copied verbatim into generated packages
-│   ├── README.md                # Substituted into generated packages
-│   └── deployments.md           # Substituted into generated packages
+│   ├── publish.sh               # Copied into generated packages as scripts/publish.sh
+│   ├── README.md, CLAUDE.md, AGENTS.md, deployments.md   # Substituted into generated packages
+│   └── LICENSE-0BSD             # Bundled default licence text
+├── bytecode/                    # Shipped compiled module + build-info.json (see below)
+├── tests/generator.test.sh      # Shell tests: generator + burn reporting against a stub `sui`
+├── docs/                        # IMPLEMENTATION_GUIDE.md, WALRUS.md, onchain/, audit/ (not shipped)
 ├── README.md                    # User-facing reference and feature overview
-├── IMPLEMENTATION_GUIDE.md      # Practical deployment workflows
+├── AGENTS.md, SECURITY.md       # Agent guide, security policy
 └── CLAUDE.md                    # This file
 
 my_token/         # Example: a generated concrete instance
 ├── Move.toml
+├── Move.lock                   # The template's pin, root entry renamed (an existing one is kept)
 ├── sources/
 │   └── mytoken.move            # Concrete: all placeholders substituted
 ├── scripts/
-│   └── publish.sh              # Inherits from template
+│   └── publish.sh              # Copy of templates/publish.sh
 ├── deployments.md               # Post-deployment artefact IDs (filled in after each deploy)
 └── build/
 ```
@@ -127,8 +134,8 @@ my_token/         # Example: a generated concrete instance
 
 1. Validates all env vars are set (colon expansion: fails on unset AND empty).
 2. Creates output directory with `sources/` and `scripts/` subdirectories.
-3. Copies and substitutes `Move.toml` (package name only).
-4. Copies `publish.sh` (generic, no substitution).
+3. Copies and substitutes `Move.toml` (package name only) and carries `Move.lock` (the root pin renamed; an existing instance lock is kept).
+4. Copies `templates/publish.sh` (identifier substitution only).
 5. Copies and substitutes `sui_token_template.move` with all 8 replacements:
    - Module path: `sui_token_template::sui_token_template` → `$TOKEN_PACKAGE_NAME::$TOKEN_MODULE_NAME`
    - Struct: `SUI_TOKEN_TEMPLATE` → `$TOKEN_STRUCT_NAME`
@@ -151,17 +158,19 @@ my_token/         # Example: a generated concrete instance
 4. **Build & Test** — Run `sui move test` and `sui move build`.
 5. **Confirmation** — Print summary, require user type `CONFIRM`.
 6. **Publish** — Run `sui client publish --gas-budget 100000000`. Parse the package ID and the objects `init` created (TreasuryCap unless fixed, initial supply Coin, MetadataCap unless frozen).
-7. **Burn UpgradeCap** — asks for its own typed `BURN` confirmation (the publish `CONFIRM` does not cover it), then calls `0x2::package::make_immutable`. Declining keeps the UpgradeCap and prints the command to burn it later.
-8. **Transfer TreasuryCap** — Transfer to governance multisig after its own typed confirmation (`TRANSFER`; on mainnet the first 10 characters of the address), then re-read the owner. The burn is verified by the UpgradeCap no longer existing, and every ID is saved to `$OUTPUT_DIR/.env.<network>` as soon as it is known (a second run refuses to publish a second coin). Includes recovery instructions if transfer fails (print object ID and manual command).
-9. **Summary** — Print all IDs, blob URLs, addresses, and next steps.
+   - **6a Finalize** — `coin_registry::finalize_registration` promotes the pending `Currency`.
+   - **6b Burn UpgradeCap** — asks for its own typed `BURN` confirmation (the publish `CONFIRM` does not cover it), then calls `0x2::package::make_immutable`. Declining keeps the UpgradeCap and prints the command to burn it later. The burn is verified by `object_state`: only a definite "not found" for that object ID counts as consumed; a failed lookup (outage, timeout) or a surviving cap aborts, and `TOKEN_UPGRADE_CAP_BURNED=yes` is recorded only after a verified burn.
+7. **Hand over the supply authority** — Transfer the TreasuryCap (if any) and the initial supply Coin to the governance multisig after its own typed confirmation (`TRANSFER`; on mainnet the first 10 characters of the address), then re-read the owner. Every ID is saved to `$OUTPUT_DIR/.env.<network>` as soon as it is known (a second run refuses to publish a second coin). Includes recovery instructions if transfer fails (print object ID and manual command).
+8. **Summary** — Print all IDs, blob URLs, addresses, and next steps. The UpgradeCap line reports the recorded state (`burned — package is immutable`, or `NOT burned — kept by the deployer` with a warning), never an assumption.
 
 **Error Handling:**
 
 - All phases use `set -euo pipefail`.
-- Phases 1–6 abort cleanly on first error (no partial state).
-- Phase 7 (burn) uses `if !` to print recovery instructions if it fails post-publish.
-- Phase 8 (transfer) uses `if !` similarly.
+- Phases 1–6 abort cleanly on first error (no partial state; after the publish, the recorded `.env.<network>` is the resume point).
+- Phase 6b (burn) uses `if !` to print recovery instructions if it fails post-publish.
+- Phase 7 (transfer) uses `if !` similarly.
 - Phase 5 (confirmation) exits cleanly if user doesn't type exact string.
+- `object_state` (found / gone / unknown) is one block, identical in `deploy_token.sh` and `templates/publish.sh`; `tests/generator.test.sh` compares the two. Change both together.
 
 **Flags and Env Vars:**
 
@@ -176,7 +185,7 @@ my_token/         # Example: a generated concrete instance
 **Behavior:** Requires the active Sui env to equal the target network (never switches it). Publishes
 (test-publish on localnet), then `coin_registry::finalize_registration`, then `set_icon_url` from
 `<STRUCT>_ICON_URL`, then — only with `--confirm-immutable` or an interactive `CONFIRM` — burns the
-UpgradeCap and verifies it was consumed. IDs are saved to `.env.<network>` after each step, so a
+UpgradeCap and verifies it was consumed (a definite "not found"; a lookup that merely failed stops the run, and so does a missing recorded UpgradeCap ID). IDs are saved to `.env.<network>` after each step, so a
 re-run resumes rather than republishing. Unknown arguments are rejected.
 
 ---
@@ -187,8 +196,15 @@ re-run resumes rather than republishing. Unknown arguments are rejected.
   generated only by `scripts/build-bytecode.sh` (`npm run build:bytecode`). Never edit them by hand.
 - Any change to `sources/` must be followed by `npm run build:bytecode` in the same commit; CI
   (`--check`) fails on a mismatch.
-- `Move.lock` is committed and pins the framework revision, so the build is reproducible. Moving to a
-  newer framework is deliberate: delete `Move.lock`, rebuild, review the bytecode diff, commit.
+- `Move.lock` is committed and pins the framework revision, so the build is reproducible. It also ships
+  in the npm package and `03_create_token.sh` copies it into generated packages. Moving to a newer
+  framework is deliberate: delete `Move.lock`, rebuild, review the bytecode diff, commit.
+- **Package layout contract.** `exports` exposes only `package.json` and `bytecode/*`; consumers read
+  `sources/`, `templates/`, `Move.toml`, `Move.lock` and `scripts/` by path from the package directory.
+  These paths are the contract (README, "Package layout contract"); changing one is a breaking release.
+- `Move.toml` `version` (1.0.0) is copied into every generated package and is not synchronised with the
+  npm version; whether it should be is an open question (audit F8 / OQ5). Do not bump it casually: a
+  change alters the manifest every generated package starts from.
 - Consumers (`@meddleware/sui-token-client`) read the bytecode and check `build-info.json` instead of
   compiling.
 
@@ -280,18 +296,22 @@ The icon URL (from Phase 2 of deploy_token.sh) is immutable on-chain. Off-chain 
 sui move test --build-env testnet --path .
 ```
 
-Four tests:
+Six tests (they exercise `init_with`, which takes the supply and metadata policy as arguments):
 
-1. `test_treasury_cap_transferred_to_sender` — Verifies the TreasuryCap is owned by the deployer.
-2. `test_treasury_cap_present_in_sender` — Verifies the TreasuryCap is present after init.
-3. `test_metadata_cap_present_in_sender` — Verifies the MetadataCap is present after init (metadata stays governance-updatable).
-4. `test_currency_transferred_to_registry_after_init` — Verifies the Currency is transferred to the registry address (`@0xc`), pending `finalize_registration`.
+1. `constants_are_applied` — checks whatever constants the package was generated with against the registry's `Currency` (`is_supply_fixed`, `is_metadata_cap_deleted`, `total_supply`).
+2. `mintable_supply_keeps_the_treasury_cap` — a mintable coin keeps its `TreasuryCap` (the mint already counted in the supply).
+3. `mintable_without_initial_supply_mints_nothing` — no initial supply, nothing minted.
+4. `frozen_metadata_deletes_the_metadata_cap` — frozen metadata leaves no `MetadataCap`, recorded in the registry.
+5. `mintable_and_updatable_hands_both_caps_to_the_sender` — both capabilities go to the publisher.
+6. `fixed_supply_requires_an_initial_mint` — the framework's `EEmptySupply` abort.
 
-All generated instances inherit these tests via substitution.
+All generated instances inherit these tests via substitution. The shell tests are separate:
+`bash tests/generator.test.sh` (generator rules, carried `Move.lock`, and the burn reporting of
+`deploy_token.sh` / `publish.sh` against a stub `sui` that answers found / not found / transient failure).
 
 ### Integration Testing
 
-The `deploy_token.sh` pipeline includes `sui move test` and `sui move build` as Phases 4–5. These verify the generated instance:
+The `deploy_token.sh` pipeline includes `sui move test` and `sui move build` as Phase 4. These verify the generated instance:
 
 1. Compiles without errors.
 2. All tests pass.

@@ -1,6 +1,6 @@
 {
   "name": "@meddleware/sui-token-template",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "private": false,
   "type": "module",
   "author": "MeddleWare <dev@meddleware.co.uk>",
@@ -29,6 +29,7 @@
   },
   "files": [
     "Move.toml",
+    "Move.lock",
     "sources/",
     "templates/",
     "scripts/",

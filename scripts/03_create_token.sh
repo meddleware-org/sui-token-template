@@ -170,9 +170,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE_DIR="$SCRIPT_DIR/.."
 TEMPLATE_MOVE="$TEMPLATE_DIR/sources/sui_token_template.move"
 TEMPLATE_TOML="$TEMPLATE_DIR/Move.toml"
+TEMPLATE_LOCK="$TEMPLATE_DIR/Move.lock"
 
 [[ -f "$TEMPLATE_MOVE" ]] || fail "Template source not found at $TEMPLATE_MOVE"
 [[ -f "$TEMPLATE_TOML" ]] || fail "Template Move.toml not found at $TEMPLATE_TOML"
+[[ -f "$TEMPLATE_LOCK" ]] || fail "Template Move.lock not found at $TEMPLATE_LOCK"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # License resolution (see the usage block above for the env vars involved).
@@ -271,6 +273,12 @@ set_line() {
 # Copy Move.toml and substitute package name (an identifier, validated above) and licence id
 sed "s/sui_token_template/$TOKEN_PACKAGE_NAME/g" "$TEMPLATE_TOML" > "$STAGE/Move.toml"
 sed -i "s|^license = .*|license = \"$SPDX_ID\"|" "$STAGE/Move.toml"
+cp "$TEMPLATE_LOCK" "$STAGE/Move.lock"
+
+# Move.lock: pins the framework revision the template was built and tested with (F7), so the generated
+# package builds against the same framework. Only the root package's pin carries the template name; the
+# line is replaced whole. An existing instance keeps its own lock (see the install step).
+set_line "$STAGE/Move.lock" '[pinned.testnet.sui_token_template]' "[pinned.testnet.$TOKEN_PACKAGE_NAME]"
 
 # publish.sh (identifiers only)
 cp "$TEMPLATE_PUBLISH" "$STAGE/scripts/publish.sh"
@@ -360,6 +368,7 @@ set_line "$SRC" 'const FROZEN_METADATA: bool = false;' "const FROZEN_METADATA: b
 # Post-generation checks, all on the staging copy. A failure here leaves OUTPUT_DIR untouched.
 # ─────────────────────────────────────────────────────────────────────────────
 ! grep -q "sui_token_template" "$SRC" || fail "Template identifier 'sui_token_template' still present in generated source. Substitution failed."
+! grep -q "sui_token_template" "$STAGE/Move.lock" || fail "Template identifier 'sui_token_template' still present in Move.lock. Substitution failed."
 ! grep -q "sui_token_template" "$STAGE/Move.toml" || fail "Template identifier 'sui_token_template' still present in Move.toml. Substitution failed."
 ! grep -q "SUI_TOKEN_TEMPLATE" "$STAGE/scripts/publish.sh" || fail "Template identifier 'SUI_TOKEN_TEMPLATE' still present in generated publish.sh. Substitution failed."
 ! grep -qE 'X[A-Z_]+X' "$STAGE/scripts/publish.sh" || fail "Unreplaced X...X placeholder in generated publish.sh. Substitution incomplete."
@@ -373,6 +382,8 @@ set_line "$SRC" 'const FROZEN_METADATA: bool = false;' "const FROZEN_METADATA: b
 mkdir -p "$OUT_ABS"
 # Hidden staging helpers are never part of the package.
 rm -f "$STAGE"/.subst.* "$STAGE"/.line.* "$STAGE"/.readme.* 2>/dev/null || true
+# An existing Move.lock is the instance's own (it may pin more environments than the template's): keep it.
+if [[ -e "$OUT_ABS/Move.lock" ]]; then rm -f -- "$STAGE/Move.lock"; fi
 cp -a "$STAGE"/. "$OUT_ABS"/
 if [[ "$LICENSE_PROPRIETARY" == "1" ]]; then
     # Switching an existing instance to proprietary removes the LICENSE this generator wrote earlier.

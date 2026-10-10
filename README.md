@@ -60,12 +60,17 @@ This automatically:
 ```text
 
 ├── Move.toml                  # Template manifest
+├── Move.lock                  # Pins the framework revision (carried into generated packages)
 ├── sources/
 │   └── sui_token_template.move     # Template source with inline tests and placeholders
 ├── scripts/
 │   ├── 03_create_token.sh         # Generator: template → concrete instance
-│   ├── deploy_token.sh         # Full deployment pipeline
-│   └── publish.sh             # Simple build + publish wrapper
+│   ├── deploy_token.sh            # Full deployment pipeline
+│   └── build-bytecode.sh          # Rebuild / check the shipped bytecode
+├── templates/
+│   └── publish.sh                 # Copied into every generated package as scripts/publish.sh
+├── bytecode/                      # Shipped compiled module + build-info.json
+├── tests/generator.test.sh        # Shell tests (generator, burn reporting) against a stub CLI
 └── README.md                  # This file
 ```
 
@@ -95,10 +100,11 @@ When you run `03_create_token.sh` or `deploy_token.sh`, a concrete token instanc
 ```text
 my_token/
 ├── Move.toml
+├── Move.lock                       # The template's framework pin, root entry renamed to your package
 ├── sources/
 │   └── mytoken.move                # Concrete: all placeholders substituted
 ├── scripts/
-│   └── publish.sh                 # Simple build + publish wrapper
+│   └── publish.sh                 # Publish + finalize_registration + icon + optional UpgradeCap burn
 └── build/                         # Compiled bytecode
 ```
 
@@ -249,6 +255,13 @@ The script runs 8 phases, each with clear output and error handling:
 - Parses the package ID and the objects `init` created from the JSON output: the TreasuryCap (none for a fixed supply), the initial supply `Coin<T>` (none for a zero supply), the MetadataCap (none for frozen metadata), the pending Currency and the UpgradeCap.
 - Aborts if what exists does not match the chosen policy.
 
+#### Phase 6a / 6b: Finalize registration, burn the UpgradeCap
+
+- 6a runs `coin_registry::finalize_registration` so the `Currency<T>` is shared and discoverable.
+- 6b asks for a typed `BURN`; anything else keeps the `UpgradeCap` (the package stays upgradeable) and prints the command to burn it later.
+- After a burn the `UpgradeCap` must be **definitely gone**: only the CLI's "Object … not found" for that object ID counts. A lookup that failed for any other reason (RPC outage, timeout) aborts with "Immutability is NOT confirmed" and records nothing; an `UpgradeCap` that still exists aborts too. `TOKEN_UPGRADE_CAP_BURNED=yes` is written to `.env.<network>` only after a verified burn.
+- The summary (phase 8) reports the recorded state, never an assumption: `burned — package is immutable`, or `NOT burned — kept by the deployer; the package is still upgradeable` with a warning and the burn command.
+
 #### Phase 7: Hand over the supply authority
 
 - Runs `sui client transfer --object-id <id> --to $TREASURY_ADDRESS --gas-budget 10000000` for the TreasuryCap (if one exists) and for the initial supply coin (if one exists), after one typed confirmation, and re-reads each owner from the chain.
@@ -260,7 +273,7 @@ The script runs 8 phases, each with clear output and error handling:
 
 #### Phase 8: Summary
 
-- Prints all key values: package ID, TreasuryCap ID, blob ID, blob URL, addresses.
+- Prints all key values: package ID, TreasuryCap ID, UpgradeCap ID and whether it was burned, blob ID, blob URL, addresses.
 - Prints next steps:
   1. **Record the artefact IDs** in `deployments.md`
   2. Update downstream Move.toml [addresses] entries
@@ -306,7 +319,26 @@ CLI (workspace decision D23):
 Both are exported (`@meddleware/sui-token-template/bytecode/…`). `Move.lock` is committed so the
 build is reproducible; CI rebuilds with the pinned CLI and fails if the shipped bytecode differs
 (`npm run check:bytecode`). After changing the source: `npm run build:bytecode` and commit. To move to
-a newer framework: delete `Move.lock`, rebuild, review, commit.
+a newer framework: delete `Move.lock`, rebuild, review, commit. `Move.lock` also ships in the npm package and `03_create_token.sh` copies it into every generated package (root entry renamed), so a generated coin builds against the framework revision the template was tested with; an existing instance keeps its own lock on regeneration.
+
+### Package layout contract (what consumers may read)
+
+`package.json` `exports` exposes only `./package.json`, `./bytecode/sui_token_template.mv` and
+`./bytecode/build-info.json`. Everything else is shipped by the `files` whitelist and is **read by path**
+from the package directory (`require.resolve('@meddleware/sui-token-template/package.json')`, then the
+directory). Consumers (today `@meddleware/sui-token-client`'s `gen-template.mjs`) may rely on these paths
+for the lifetime of the major version, and a change to any of them is a breaking release:
+
+| Path | Contract |
+| --- | --- |
+| `bytecode/sui_token_template.mv`, `bytecode/build-info.json` | exported; `build-info.json` keys: `toolchainVersion`, `buildEnv`, `frameworkRev`, `sourceSha256`, `moduleSha256` |
+| `sources/sui_token_template.move` | the one Move source; its patchable constants and placeholder identifiers are the wire format with the client |
+| `templates/` | the files copied or substituted into a generated package (`publish.sh`, `README.md`, `CLAUDE.md`, `AGENTS.md`, `deployments.md`, `gitignore`, `LICENSE-0BSD`) and their `X…X` placeholders |
+| `Move.toml`, `Move.lock` | the manifest and the framework pin a generated package starts from |
+| `scripts/` | the generators and the pipeline; read by operators, not imported |
+
+`docs/audit/` is not shipped. `sui-token-client`'s `check:template` (hashes against `build-info.json`) is the
+drift detector.
 
 ## Template Source (`sources/sui_token_template.move`)
 
@@ -528,6 +560,16 @@ sui move test --path $OUTPUT_DIR
 sui move test --path my_token
 ```
 
+### Shell tests
+
+```bash
+bash tests/generator.test.sh
+```
+
+No network and no real CLI: the generator's validation and substitution, the carried `Move.lock`, and the
+`UpgradeCap` burn reporting of `deploy_token.sh` and of a generated `publish.sh`, run against a stub `sui`
+on `PATH` that answers "found", "not found" and "transient failure" (CI job `generator`).
+
 ### Integration Testing
 
 The `deploy_token.sh` script includes `sui move test` as Phase 4, so generated instances are tested before publishing.
@@ -670,9 +712,11 @@ walrus blob-status --blob-id <blob-id> --context mainnet
 
 ### Package Immutability (UpgradeCap)
 
-The token package's UpgradeCap is **burned during deployment** — always by `scripts/deploy_token.sh`
-(phase 6b), and by a generated package's `scripts/publish.sh` when run with `--confirm-immutable` or
-when its interactive CONFIRM prompt is accepted. Once burned:
+The token package's UpgradeCap is **burned during deployment** when you confirm it — by
+`scripts/deploy_token.sh` (phase 6b, typed `BURN`), and by a generated package's `scripts/publish.sh`
+when run with `--confirm-immutable` or when its interactive CONFIRM prompt is accepted. Declining keeps
+the cap and the package upgradeable, and both scripts say so. Both claim immutability only when the cap is
+definitely consumed (a "not found" for that object), never because a lookup failed. Once burned:
 
 - No one can upgrade the token package.
 - The package code is permanently frozen.

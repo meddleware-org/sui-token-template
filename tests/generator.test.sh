@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Behaviour tests for scripts/03_create_token.sh (no network, no Sui CLI): validation, one-pass
-# substitution, and that a failing run leaves a pre-existing output directory byte-identical.
+# Behaviour tests for the shell tooling (no network, no real Sui CLI):
+#   - scripts/03_create_token.sh: validation, one-pass substitution, and that a failing run leaves a
+#     pre-existing output directory byte-identical;
+#   - the UpgradeCap burn reporting of the generated publish.sh and of scripts/deploy_token.sh, run against a
+#     stub `sui` / `walrus` on PATH that answers "found", "not found" and "transient failure".
 #   bash tests/generator.test.sh
 set -uo pipefail
 
@@ -120,6 +123,21 @@ tree_hash() { (cd "$1" && find . -type f -print0 | sort -z | xargs -0 sha256sum 
     && grep -q 'new.png' "$WORK/upd/sources/mytoken.move" && ok "re-running updates in place and keeps other files" || bad "in-place update" "$OUT"
 ) || true
 
+# ── Move.lock: the framework pin is carried into the generated package (F7) ───────────
+(
+  base_env; run "$WORK/lock"
+  lock="$WORK/lock/Move.lock"
+  [[ $RC -eq 0 && -f "$lock" ]] && grep -q '^\[pinned.testnet.my_token\]$' "$lock" && ! grep -q 'sui_token_template' "$lock" \
+    && ok "the generated package carries Move.lock with its own name as the root pin" || bad "lock carried" "rc=$RC $(cat "$lock" 2>/dev/null)"
+  want="$(awk -F'rev = "' '/^\[pinned\.testnet\.Sui\]/{f=1} f && /rev = /{split($2,a,"\""); print a[1]; exit}' "$HERE/Move.lock")"
+  have="$(awk -F'rev = "' '/^\[pinned\.testnet\.Sui\]/{f=1} f && /rev = /{split($2,a,"\""); print a[1]; exit}' "$lock")"
+  [[ -n "$want" && "$want" == "$have" ]] && [[ "$want" == "$(jq -r .frameworkRev "$HERE/bytecode/build-info.json")" ]] \
+    && ok "the carried pin is the framework revision recorded in build-info.json" || bad "lock rev" "$want vs $have"
+  printf '# the instance own lock\n' > "$lock"; TOKEN_ICON_URL='https://example.com/new.png' run "$WORK/lock"
+  [[ $RC -eq 0 && "$(cat "$lock")" == "# the instance own lock" ]] \
+    && ok "re-running keeps the instance's own Move.lock" || bad "lock kept on re-run" "$(cat "$lock")"
+) || true
+
 # ── dangerous output directories ──────────────────────────────────────────────────────
 (
   base_env
@@ -139,6 +157,202 @@ tree_hash() { (cd "$1" && find . -type f -print0 | sort -z | xargs -0 sha256sum 
   printf 'MIT text\n' > "$WORK/mit.txt"; TOKEN_LICENSE=MIT TOKEN_LICENSE_TEXT_FILE="$WORK/mit.txt" TOKEN_LICENSE_NAME='MIT & friends' run "$WORK/mit"
   [[ $RC -eq 0 ]] && grep -q 'MIT & friends — see the LICENSE file.' "$WORK/mit/README.md" && ok "a licence name with & is written literally" || bad "licence name" "$OUT"
   TOKEN_LICENSE='Apache 2' run "$WORK/lic"; [[ $RC -ne 0 ]] && ok "rejects an invalid licence identifier" || bad "licence id"
+) || true
+
+# ── burn reporting: the stub CLI ───────────────────────────────────────────────────────
+# A stand-in for `sui` (and `walrus`) on PATH. It answers the calls the scripts make and keeps one bit of state:
+# whether make_immutable was called. The lookup of the UpgradeCap then follows STUB_AFTER_BURN, or
+# STUB_CAP_LOOKUP when that is set (a re-run of publish.sh starts with the cap already burned or unreachable):
+#   found      the object (exit 0)                 gone       the real CLI's not-found error (exit 1)
+#   transient  a connection error (exit 1)         gone-other a not-found error for ANOTHER object (exit 1)
+#   empty      exit 0 with no objectId in the output
+STUB_BIN="$WORK/bin"; mkdir -p "$STUB_BIN"
+hex64() { head -c 64 /dev/zero | tr '\0' "$1"; }   # 64 copies of one hex digit
+STUB_PKG="0x$(hex64 a)"; STUB_CAP="0x$(hex64 c)"; STUB_TREASURY="0x$(hex64 1)"
+cat > "$STUB_BIN/sui" <<'STUB'
+#!/usr/bin/env bash
+state="${STUB_STATE:?}"; echo "$*" >> "$state/calls"
+case "$1 ${2:-}" in
+  "--version "*) echo "sui 1.81.0-stub"; exit 0 ;;
+  "client active-env") echo "${STUB_ENV:-testnet}"; exit 0 ;;
+  "client active-address") echo "$STUB_TREASURY"; exit 0 ;;
+  "client chain-identifier") echo "4c78adac"; exit 0 ;;
+  "client balance") echo '[]'; exit 0 ;;
+  "move test"|"move build") exit 0 ;;
+  "client transfer") exit 0 ;;
+esac
+fn=""; prev=""; for a in "$@"; do [[ "$prev" == "--function" ]] && fn="$a"; prev="$a"; done
+case "$1 ${2:-}" in
+  "client publish")
+    ty="${STUB_PKG}::${STUB_MODULE}::${STUB_STRUCT}"
+    cat <<JSON
+{ "objectChanges": [
+  { "type": "published", "packageId": "$STUB_PKG" },
+  { "type": "created", "objectId": "0x$(printf 'd%.0s' $(seq 64))", "objectType": "0x2::coin::TreasuryCap<$ty>" },
+  { "type": "created", "objectId": "0x$(printf 'e%.0s' $(seq 64))", "objectType": "0x2::coin_registry::MetadataCap<$ty>" },
+  { "type": "created", "objectId": "0x$(printf 'f%.0s' $(seq 64))", "objectType": "0x2::coin_registry::Currency<$ty>" },
+  { "type": "created", "objectId": "$STUB_CAP", "objectType": "0x2::package::UpgradeCap" } ] }
+JSON
+    exit 0 ;;
+  "client call")
+    case "$fn" in
+      finalize_registration)
+        printf '{ "objectChanges": [ { "type": "created", "objectId": "0x%s", "objectType": "0x2::coin_registry::Currency<%s::%s::%s>" } ] }\n' \
+          "$(printf '9%.0s' $(seq 64))" "$STUB_PKG" "$STUB_MODULE" "$STUB_STRUCT"; exit 0 ;;
+      make_immutable) touch "$state/burned"; echo '{ "objectChanges": [] }'; exit 0 ;;
+      *) echo '{ "objectChanges": [] }'; exit 0 ;;
+    esac ;;
+  "client object")
+    if [[ "$3" != "$STUB_CAP" ]]; then   # any other object: owned by the treasury (the transfer re-read)
+      printf '{ "objectId": "%s", "owner": { "AddressOwner": "%s" } }\n' "$3" "$STUB_TREASURY"; exit 0
+    fi
+    mode="${STUB_CAP_LOOKUP:-}"
+    if [[ -z "$mode" ]]; then if [[ -e "$state/burned" ]]; then mode="${STUB_AFTER_BURN:-gone}"; else mode=found; fi; fi
+    case "$mode" in
+      found) printf '{ "objectId": "%s", "version": 1 }\n' "$STUB_CAP"; exit 0 ;;
+      gone) echo "code: 'Some requested entity was not found', message: \"Object $STUB_CAP not found\"" >&2; exit 1 ;;
+      gone-other) echo "code: 'Some requested entity was not found', message: \"Object 0x$(printf '7%.0s' $(seq 64)) not found\"" >&2; exit 1 ;;
+      transient) echo "code: 'The service is currently unavailable', message: \"error trying to connect: tcp connect error\"" >&2; exit 1 ;;
+      empty) echo '{}'; exit 0 ;;
+    esac ;;
+esac
+echo "stub sui: unhandled: $*" >&2; exit 99
+STUB
+cat > "$STUB_BIN/walrus" <<'STUB'
+#!/usr/bin/env bash
+echo '{"newlyCreated":{"blobObject":{"blobId":"BLOBID1"},"object":"0xb10b"}}'
+STUB
+chmod +x "$STUB_BIN/sui" "$STUB_BIN/walrus"
+
+# stub_env <case> — a fresh stub state directory and the variables the stub reads
+stub_env() {
+  export STUB_STATE="$WORK/state-$1"; rm -rf "$STUB_STATE"; mkdir -p "$STUB_STATE"
+  export STUB_PKG STUB_CAP STUB_TREASURY STUB_MODULE=mytoken STUB_STRUCT=MYTOKEN
+  unset STUB_CAP_LOOKUP STUB_AFTER_BURN STUB_ENV
+  export PATH="$STUB_BIN:$PATH"
+}
+
+# ── the not-found rule (object_state) ───────────────────────────────────────────────────
+# Both scripts carry the same block; extract it from each and run it against the stub.
+extract_state_fn() { sed -n '/^# BEGIN object_state/,/^# END object_state/p' "$1"; }
+norm() { sed 's/^[[:space:]]*//' | grep -v '^# BEGIN object_state'; }   # the BEGIN lines name the other file
+if [[ "$(extract_state_fn "$HERE/scripts/deploy_token.sh" | norm)" == "$(extract_state_fn "$HERE/templates/publish.sh" | norm)" \
+      && -n "$(extract_state_fn "$HERE/templates/publish.sh")" ]]; then
+  ok "deploy_token.sh and publish.sh carry the same object_state block"
+else
+  bad "object_state blocks differ or are missing"
+fi
+(
+  stub_env state; command -v jq >/dev/null || { bad "jq is needed for the object_state cases"; exit 0; }
+  for src in "$HERE/scripts/deploy_token.sh" "$HERE/templates/publish.sh"; do
+    name="$(basename "$src")"
+    # shellcheck disable=SC1090
+    source <(extract_state_fn "$src")
+    check() { # <mode> <expected> <label>
+      export STUB_CAP_LOOKUP="$1"; got="$(object_state "$STUB_CAP" 2>/dev/null)"
+      [[ "$got" == "$2" ]] && ok "$name: $3 -> $2" || bad "$name: $3" "expected $2, got '$got'"
+    }
+    check found found "the object exists"
+    check gone gone "the CLI reports THIS object as not found"
+    check transient unknown "a connection error is not a consumed object"
+    check gone-other unknown "a not-found for another object is not a consumed object"
+    check empty unknown "exit 0 without an objectId is not a consumed object"
+    STUB_CAP_LOOKUP=transient object_state "$STUB_CAP" 2>&1 >/dev/null | grep -q 'tcp connect error' \
+      && ok "$name: the CLI output of an unknown lookup reaches stderr" || bad "$name: unknown prints the CLI output"
+  done
+) || true
+
+# ── generated publish.sh: the immutability claim ────────────────────────────────────────
+# gen_pkg <dir> — a generated package with a recorded publish (an .env file as a first run would leave it)
+gen_pkg() {
+  base_env; bash "$GEN" --output-dir "$1" >/dev/null 2>&1
+  cat > "$1/.env.testnet" <<ENV
+MYTOKEN_TOKEN_PACKAGE_ID=$STUB_PKG
+MYTOKEN_UPGRADE_CAP_ID=$STUB_CAP
+MYTOKEN_PENDING_CURRENCY_ID=0x$(hex64 9)
+MYTOKEN_METADATA_OBJECT_ID=0x$(hex64 9)
+MYTOKEN_ICON_URL=https://example.com/i.png
+MYTOKEN_ICON_URL_SET=https://example.com/i.png
+ENV
+}
+pub() { # <dir> <args…> — run the generated publish.sh, answering the interactive prompt with PUB_ANSWER; OUT/RC
+  local d=$1; shift; OUT="$(printf '%s\n' "${PUB_ANSWER:-no}" | bash "$d/scripts/publish.sh" testnet "$@" 2>&1)"; RC=$?
+}
+(
+  stub_env pub1; gen_pkg "$WORK/p1"
+  STUB_CAP_LOOKUP=gone pub "$WORK/p1"
+  [[ $RC -eq 0 ]] && echo "$OUT" | grep -q 'already consumed — package is immutable' \
+    && ok "publish.sh: a definite not-found on re-run reports the package immutable" || bad "publish.sh re-run, consumed" "rc=$RC $OUT"
+
+  STUB_CAP_LOOKUP=transient pub "$WORK/p1"
+  [[ $RC -ne 0 ]] && ! echo "$OUT" | grep -qi 'immutable —\|permanently immutable\|already consumed' && echo "$OUT" | grep -q 'cannot tell whether UpgradeCap' \
+    && ok "publish.sh: a transient lookup failure on re-run stops without an immutability claim" || bad "publish.sh re-run, transient" "rc=$RC $OUT"
+
+  STUB_CAP_LOOKUP=gone-other pub "$WORK/p1"
+  [[ $RC -ne 0 ]] && ! echo "$OUT" | grep -q 'already consumed' \
+    && ok "publish.sh: a not-found for another object is not read as consumed" || bad "publish.sh re-run, other object" "rc=$RC $OUT"
+) || true
+(
+  stub_env pub2; gen_pkg "$WORK/p2"
+  pub "$WORK/p2" --confirm-immutable
+  [[ $RC -eq 0 ]] && echo "$OUT" | grep -q 'permanently immutable (UpgradeCap consumed)' && grep -q 'make_immutable' "$STUB_STATE/calls" \
+    && ok "publish.sh: --confirm-immutable burns and verifies a definite not-found" || bad "publish.sh burn" "rc=$RC $OUT"
+
+  stub_env pub3; gen_pkg "$WORK/p3"; STUB_AFTER_BURN=transient pub "$WORK/p3" --confirm-immutable
+  [[ $RC -ne 0 ]] && grep -q 'make_immutable' "$STUB_STATE/calls" && ! echo "$OUT" | grep -q 'permanently immutable' \
+    && ok "publish.sh: the burn is not reported when the check cannot read the UpgradeCap" || bad "publish.sh burn, transient" "rc=$RC $OUT"
+
+  stub_env pub4; gen_pkg "$WORK/p4"; STUB_AFTER_BURN=found pub "$WORK/p4" --confirm-immutable
+  [[ $RC -ne 0 ]] && echo "$OUT" | grep -q 'still exists after make_immutable' \
+    && ok "publish.sh: an UpgradeCap that survives the burn is an error" || bad "publish.sh burn, survives" "rc=$RC $OUT"
+
+  stub_env pub5; gen_pkg "$WORK/p5"; pub "$WORK/p5"   # no flag: the interactive prompt is answered "no"
+  [[ $RC -eq 0 ]] && echo "$OUT" | grep -q 'NOT burned' && echo "$OUT" | grep -q 'Skipped immutability step' && ! grep -q 'make_immutable' "$STUB_STATE/calls" \
+    && ok "publish.sh: declining keeps the UpgradeCap and says so" || bad "publish.sh decline" "rc=$RC $OUT"
+
+  stub_env pub6; gen_pkg "$WORK/p6"; sed -i '/UPGRADE_CAP_ID/d' "$WORK/p6/.env.testnet"; pub "$WORK/p6"
+  [[ $RC -ne 0 ]] && ! echo "$OUT" | grep -q 'already consumed' \
+    && ok "publish.sh: no recorded UpgradeCap ID is not read as consumed" || bad "publish.sh no cap id" "rc=$RC $OUT"
+) || true
+
+# ── deploy_token.sh: the summary and the burn check ─────────────────────────────────────
+# deploy <case> <answers> [after-burn mode] — the whole pipeline against the stub: Walrus upload (Enter), CONFIRM, <answers>
+deploy() {
+  stub_env "dep-$1"; [[ -z "${3:-}" ]] || export STUB_AFTER_BURN="$3"
+  base_env; export TOKEN_IMAGE_PATH="$WORK/icon.png" OUTPUT_DIR="$WORK/dep-$1" NETWORK=testnet TREASURY_ADDRESS="$STUB_TREASURY"
+  printf 'png' > "$TOKEN_IMAGE_PATH"
+  OUT="$(printf '\nCONFIRM\n%b' "$2" | bash "$HERE/scripts/deploy_token.sh" 2>&1)"; RC=$?
+}
+(
+  deploy decline 'no\nTRANSFER\n'
+  [[ $RC -eq 0 ]] && echo "$OUT" | grep -q "UpgradeCap kept" \
+    && echo "$OUT" | grep -q "UpgradeCap ID:      $STUB_CAP (NOT burned — kept by the deployer; the package is still upgradeable)" \
+    && ! echo "$OUT" | grep -q 'burned — package is immutable' && ! echo "$OUT" | grep -q 'Package is now immutable' \
+    && echo "$OUT" | grep -q 'WARNING: the UpgradeCap was NOT burned' \
+    && ! grep -q 'TOKEN_UPGRADE_CAP_BURNED' "$WORK/dep-decline/.env.testnet" && ! grep -q 'make_immutable' "$STUB_STATE/calls" \
+    && ok "deploy_token.sh: declining BURN leaves a summary that says the UpgradeCap is kept" || bad "deploy decline" "rc=$RC $OUT"
+) || true
+(
+  deploy burn 'BURN\nTRANSFER\n'
+  [[ $RC -eq 0 ]] && echo "$OUT" | grep -q "UpgradeCap ID:      $STUB_CAP (burned — package is immutable)" \
+    && grep -q '^TOKEN_UPGRADE_CAP_BURNED=yes$' "$WORK/dep-burn/.env.testnet" && ! echo "$OUT" | grep -q 'WARNING: the UpgradeCap was NOT burned' \
+    && ok "deploy_token.sh: a verified burn is recorded and summarised as immutable" || bad "deploy burn" "rc=$RC $OUT"
+) || true
+(
+  deploy transient 'BURN\nTRANSFER\n' transient
+  [[ $RC -ne 0 ]] && grep -q 'make_immutable' "$STUB_STATE/calls" && echo "$OUT" | grep -q 'Immutability is NOT confirmed' \
+    && ! echo "$OUT" | grep -q 'verified gone' && ! grep -q 'TOKEN_UPGRADE_CAP_BURNED' "$WORK/dep-transient/.env.testnet" \
+    && ok "deploy_token.sh: a failed lookup after the burn is not recorded as burned" || bad "deploy burn, transient" "rc=$RC $OUT"
+) || true
+(
+  deploy survives 'BURN\nTRANSFER\n' found
+  [[ $RC -ne 0 ]] && echo "$OUT" | grep -q 'still exists. The package is NOT immutable' && ! grep -q 'TOKEN_UPGRADE_CAP_BURNED' "$WORK/dep-survives/.env.testnet" \
+    && ok "deploy_token.sh: an UpgradeCap that survives the burn is an error" || bad "deploy burn, survives" "rc=$RC $OUT"
+) || true
+(
+  deploy other 'BURN\nTRANSFER\n' gone-other
+  [[ $RC -ne 0 ]] && ! grep -q 'TOKEN_UPGRADE_CAP_BURNED' "$WORK/dep-other/.env.testnet" \
+    && ok "deploy_token.sh: a not-found for another object is not read as consumed" || bad "deploy burn, other object" "rc=$RC $OUT"
 ) || true
 
 PASS=$(grep -c '^ok$' "$RESULTS" || true); FAILED=$(grep -c '^FAIL$' "$RESULTS" || true)

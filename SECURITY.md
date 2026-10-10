@@ -34,10 +34,12 @@ It does not cover:
 3. **Name, symbol and decimals are fixed forever** by the coin registry. Description and icon URL are
    editable only by the `MetadataCap` holder (until it is deleted — `FROZEN_METADATA` — after which
    they are fixed too). The registry reports both guarantees.
-4. **Immutability is explicit.** A generated package is immutable only once its `UpgradeCap` has been
-   burned (`0x2::package::make_immutable`) — `deploy_token.sh` always burns it; the per-instance
-   `scripts/publish.sh` burns it only with `--confirm-immutable` or an interactive `CONFIRM`, and
-   verifies the cap was consumed.
+4. **Immutability is explicit and verified.** A generated package is immutable only once its `UpgradeCap`
+   has been burned (`0x2::package::make_immutable`). `deploy_token.sh` burns it after a typed `BURN`;
+   the per-instance `scripts/publish.sh` burns it only with `--confirm-immutable` or an interactive
+   `CONFIRM`. Both verify that the cap was consumed, and count only a definite "not found" for that
+   object as consumed: a lookup that fails for any other reason stops the run without an immutability
+   claim, and the `deploy_token.sh` summary reports a declined burn as such.
 5. **Registration is completed.** `coin_registry::finalize_registration` promotes the pending
    `Currency<T>` to a shared, discoverable object; both deployment paths run it.
 

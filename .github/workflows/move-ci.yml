@@ -64,6 +64,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Validation, one-pass substitution, and a failing run leaving an existing directory untouched.
+      # Validation, one-pass substitution, a failing run leaving an existing directory untouched, and the
+      # UpgradeCap burn reporting of publish.sh / deploy_token.sh against a stub CLI (found / not found / transient).
       - name: tests/generator.test.sh
         run: bash tests/generator.test.sh
+
+  npm-audit:
+    name: npm audit (high)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      # The dependency tree is empty today; the gate is here so the first dependency that ever appears is
+      # checked, in CI and (through the reusable `verify` job) before every publish.
+      - name: npm audit
+        run: npm audit --audit-level=high

@@ -287,12 +287,37 @@ CURRENCY_ID=$(echo "$FINALIZE_OUTPUT" | jq -r --arg t "::coin_registry::Currency
 echo "Currency registered (shared): ${CURRENCY_ID:-<see transaction>}"
 echo ""
 
+# BEGIN object_state (the same block is in templates/publish.sh; tests/generator.test.sh compares them)
+# object_state <id> — prints exactly one word: found | gone | unknown.
+#   found    the CLI returned the object.
+#   gone     the CLI said the object definitely does not exist: a "not found" for THIS object id (what a
+#            consumed object gives), or a JSON "deleted" / "notExists" error.
+#   unknown  anything else (RPC outage, timeout, wrong environment, unreadable output); the CLI output goes
+#            to stderr. Only "gone" may be read as "the UpgradeCap was consumed".
+object_state() {
+    local want out rc=0 json
+    want=$(printf '%s' "${1#0x}" | tr '[:upper:]' '[:lower:]' | sed 's/^0*//')
+    out=$(sui client object "$1" --json 2>&1) || rc=$?
+    json=$(printf '%s\n' "$out" | awk '/^{/,0')
+    if [[ $rc -eq 0 ]]; then
+        if jq -e '.objectId != null' <<<"$json" >/dev/null 2>&1; then echo found; return 0; fi
+        if jq -e '(.error.code // "") | test("^(deleted|notExists)$")' <<<"$json" >/dev/null 2>&1; then echo gone; return 0; fi
+    elif printf '%s\n' "$out" | tr '[:upper:]' '[:lower:]' | grep -Eq "object 0x0*${want} not found"; then
+        echo gone; return 0
+    fi
+    printf 'sui client object %s: could not tell whether the object exists (exit %s):\n%s\n' "$1" "$rc" "$out" >&2
+    echo unknown
+}
+# END object_state
+
 # ============================================================================
 # Phase 6b: Burn UpgradeCap
 # ============================================================================
 
 echo "=== Phase 6b: Burn UpgradeCap ==="
 echo ""
+# The summary reports this, never an assumption: it becomes "yes" only after the burn is verified.
+UPGRADE_CAP_BURNED=no
 echo "  UpgradeCap ID: $UPGRADE_CAP_ID"
 echo ""
 # The publish confirmation above does not cover this irreversible step: ask again, specifically.
@@ -314,11 +339,22 @@ elif ! sui client call --json \
     echo "    --args $UPGRADE_CAP_ID --gas-budget 10000000" >&2
     exit 1
 else
-    # Success is not inferred from the exit code: the UpgradeCap must be gone (consumed).
-    if sui client object "$UPGRADE_CAP_ID" --json >/dev/null 2>&1; then
-        echo "ERROR: the burn call returned, but UpgradeCap $UPGRADE_CAP_ID still exists. The package is NOT immutable." >&2
-        exit 1
-    fi
+    # Success is not inferred from the exit code: the UpgradeCap must be definitely gone (consumed). A lookup
+    # that merely failed (RPC outage, timeout) proves nothing, so it is neither "burned" nor "kept".
+    case "$(object_state "$UPGRADE_CAP_ID")" in
+        gone) ;;
+        found)
+            echo "ERROR: the burn call returned, but UpgradeCap $UPGRADE_CAP_ID still exists. The package is NOT immutable." >&2
+            exit 1
+            ;;
+        *)
+            echo "ERROR: the burn call returned, but the state of UpgradeCap $UPGRADE_CAP_ID could not be read (see above)." >&2
+            echo "       Immutability is NOT confirmed. Check: sui client object $UPGRADE_CAP_ID --json" >&2
+            echo "       (\"Object … not found\" means it was consumed and the package is immutable.)" >&2
+            exit 1
+            ;;
+    esac
+    UPGRADE_CAP_BURNED=yes
     record TOKEN_UPGRADE_CAP_BURNED "yes"
     echo "UpgradeCap burned and verified gone. Package is now immutable."
 fi
@@ -382,6 +418,12 @@ echo ""
 echo "=== Phase 8: Deployment Summary ==="
 echo ""
 
+if [[ "$UPGRADE_CAP_BURNED" == "yes" ]]; then
+    UPGRADE_CAP_NOTE="burned — package is immutable"
+else
+    UPGRADE_CAP_NOTE="NOT burned — kept by the deployer; the package is still upgradeable"
+fi
+
 cat <<EOF
 Deployment complete!
 
@@ -393,7 +435,7 @@ Initial supply:     ${INITIAL_COIN_ID:-<none>}${INITIAL_COIN_ID:+ (transferred t
 Metadata policy:    $METADATA_POLICY
 MetadataCap ID:     ${METADATA_CAP_ID:-<none: metadata is frozen and recorded in the registry>}${METADATA_CAP_ID:+ (retained by the deployer — can change description/icon)}
 Currency ID:        ${CURRENCY_ID:-<see finalize transaction>} (shared, registry-discoverable)
-UpgradeCap ID:      $UPGRADE_CAP_ID (burned — package is immutable)
+UpgradeCap ID:      $UPGRADE_CAP_ID ($UPGRADE_CAP_NOTE)
 Blob ID:            $BLOB_ID
 Blob object ID:     $BLOB_OBJECT_ID
 Blob URL:           $BLOB_URL
@@ -407,6 +449,16 @@ Next steps:
   4. Set up blob lifetime monitoring for blob object ID
 
 EOF
+
+if [[ "$UPGRADE_CAP_BURNED" != "yes" ]]; then
+    cat <<EOF
+WARNING: the UpgradeCap was NOT burned. The package is NOT immutable: its deployer can still upgrade it.
+         To make it immutable (irreversible):
+           sui client call --package 0x2 --module package --function make_immutable \\
+             --args $UPGRADE_CAP_ID --gas-budget 10000000
+
+EOF
+fi
 
 if [[ "$BLOB_OBJECT_ID" == "N/A" ]]; then
     cat <<EOF

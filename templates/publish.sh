@@ -20,7 +20,8 @@
 #                                      skipped when the metadata policy is "frozen" (the icon is the
 #                                      ICON_URL constant, for good)
 #   4. package::make_immutable       → only with --confirm-immutable or an interactive CONFIRM;
-#                                      verified by the UpgradeCap no longer existing.
+#                                      verified by the UpgradeCap no longer existing (a definite
+#                                      "not found"; a lookup that merely failed stops the run).
 set -euo pipefail
 
 PKG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -82,10 +83,28 @@ run_json() {
 	echo "$out" | awk '/^{/,0'
 }
 
-# True if the object currently exists on-chain (a deleted/consumed object makes the CLI exit non-zero).
-is_object_exists() {
-	sui client object "$1" --json 2>/dev/null | jq -e '.objectId != null' > /dev/null 2>&1
+# BEGIN object_state (the same block is in scripts/deploy_token.sh; tests/generator.test.sh compares them)
+# object_state <id> — prints exactly one word: found | gone | unknown.
+#   found    the CLI returned the object.
+#   gone     the CLI said the object definitely does not exist: a "not found" for THIS object id (what a
+#            consumed object gives), or a JSON "deleted" / "notExists" error.
+#   unknown  anything else (RPC outage, timeout, wrong environment, unreadable output); the CLI output goes
+#            to stderr. Only "gone" may be read as "the UpgradeCap was consumed".
+object_state() {
+	local want out rc=0 json
+	want=$(printf '%s' "${1#0x}" | tr '[:upper:]' '[:lower:]' | sed 's/^0*//')
+	out=$(sui client object "$1" --json 2>&1) || rc=$?
+	json=$(printf '%s\n' "$out" | awk '/^{/,0')
+	if [[ $rc -eq 0 ]]; then
+		if jq -e '.objectId != null' <<<"$json" >/dev/null 2>&1; then echo found; return 0; fi
+		if jq -e '(.error.code // "") | test("^(deleted|notExists)$")' <<<"$json" >/dev/null 2>&1; then echo gone; return 0; fi
+	elif printf '%s\n' "$out" | tr '[:upper:]' '[:lower:]' | grep -Eq "object 0x0*${want} not found"; then
+		echo gone; return 0
+	fi
+	printf 'sui client object %s: could not tell whether the object exists (exit %s):\n%s\n' "$1" "$rc" "$out" >&2
+	echo unknown
 }
+# END object_state
 
 # ─ Arguments ─────────────────────────────────────────────────────────────────
 
@@ -213,6 +232,18 @@ fi
 
 # ─ 4. Irreversible: burn the UpgradeCap to make the package immutable ───────
 
+# read_cap_state — sets CAP_STATE (found | gone) from the UpgradeCap lookup. A lookup that cannot answer
+# definitely stops the run instead of being read as "consumed" (an unverifiable lookup is never a claim of
+# immutability). Call it directly, not inside $(...): the exit must end the script.
+read_cap_state() {
+	CAP_STATE=$(object_state "$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID")
+	if [[ "$CAP_STATE" == "unknown" ]]; then
+		log "ERROR: cannot tell whether UpgradeCap $SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID still exists (see the CLI output above)."
+		log "       Nothing is claimed about immutability. Re-run when the node answers, or check: sui client object $SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID"
+		exit 1
+	fi
+}
+
 burn_upgrade_cap() {
 	log "Making XPACKAGENAMEX package immutable (this is IRREVERSIBLE)..."
 	run_json sui client call \
@@ -223,15 +254,21 @@ burn_upgrade_cap() {
 		--gas-budget 100000000 \
 		--json > /dev/null
 	# A package object is always "Immutable"-owned, so the only proof of immutability is that the
-	# UpgradeCap was consumed.
-	if is_object_exists "$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID"; then
+	# UpgradeCap was consumed: a definite "not found", not merely a failed lookup.
+	read_cap_state
+	if [[ "$CAP_STATE" != "gone" ]]; then
 		log "ERROR: UpgradeCap $SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID still exists after make_immutable"
 		exit 1
 	fi
 	log "✓ Package $SUI_TOKEN_TEMPLATE_TOKEN_PACKAGE_ID is now permanently immutable (UpgradeCap consumed)"
 }
 
-if [[ -z "${SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID:-}" ]] || ! is_object_exists "$SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID"; then
+if [[ -z "${SUI_TOKEN_TEMPLATE_UPGRADE_CAP_ID:-}" ]]; then
+	log "ERROR: no UpgradeCap ID is recorded in .env.$NETWORK, so immutability cannot be verified."
+	exit 1
+fi
+read_cap_state
+if [[ "$CAP_STATE" == "gone" ]]; then
 	log "UpgradeCap already consumed — package is immutable"
 elif [[ "$CONFIRM_IMMUTABLE" == "true" ]]; then
 	burn_upgrade_cap
