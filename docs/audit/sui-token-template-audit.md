@@ -128,7 +128,7 @@ registry.** Every finding from the third pass is closed except two residual Info
 
 **What remains (all Info):**
 
-- F8 (`Move.toml` version vs npm, OQ5: left open, recommendation recorded); F18 is RESOLVED (the unused alias
+- F8 (`Move.toml` version vs npm) is ADJUDICATED (OQ5 decided 2026-10-18: independent); F18 is RESOLVED (the unused alias
   went with the 1.0.8 rewrite).
 - Not run: `deploy_token.sh` end to end on testnet (needs a funded keystore and WAL; S1).
 
@@ -401,8 +401,8 @@ the lock beside the manifest and keep it with the package), so it was applied.
 
 ### F8 — Version drift
 
-**Severity:** Info   **Disposition:** DEFERRED (OQ5; gate: decide before the mainnet 0.2.0 / 2.0.0
-re-versioning, which resets every version anyway) — re-verified 2026-10-09: `Move.toml`
+**Severity:** Info   **Disposition:** ADJUDICATED (2026-10-18: option (b), `Move.toml` stays independent at
+`1.0.0`; OQ5 decided) — re-verified 2026-10-09: `Move.toml`
 `version = "1.0.0"` vs npm **1.0.8** (tags v1.0.0–v1.0.8). The template is never deployed, a
 generated coin's on-chain version is the package's own version counter (not the `Move.toml` string),
 and the generator copies `version = "1.0.0"` into every manifest; nothing consumes the value.
@@ -415,8 +415,12 @@ and the generator copies `version = "1.0.0"` into every manifest; nothing consum
 - (b) Keep it independent: `1.0.0` is the version a freshly generated coin package starts at, whatever
   template release made it; document that.
 - **Recommendation: (b).** The value is a property of the generated coin, not of the template, and it is
-  the least churn. It is recorded as a note in `CLAUDE.md`; the choice stays with the maintainer (OQ5),
-  at the latest at the mainnet re-versioning.
+  the least churn. It is recorded as a note in `CLAUDE.md`.
+- **Decided 2026-10-18: (b).** Option (a) has a cost and no benefit: nothing consumes the string, a
+  generated coin's on-chain version is the package's own counter, and tracking npm would change every
+  generated manifest (and `Move.lock`'s `manifest_digest`) on each template release. With one option
+  strictly better there is no decision left for the maintainer; the `CLAUDE.md` note ("not synchronised") is
+  the documentation. Revisit only if a consumer starts reading the value.
 
 ### F9 — Coupling with `token-deployer-ui` must be re-synced after the next template release
 
@@ -1146,10 +1150,8 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
 4. **OQ4** Pin the framework revision for template builds (commit/ship `Move.lock`)? — **(Decided
    2026-10-02, `ca0e2d7`: committed and recorded in `build-info.json`; shipping it to npm is the F7
    residual.)**
-5. **OQ5** Should `Move.toml` `version` track the npm version? (Open; F8. The mainnet re-versioning —
-   everything 0.2.0, this package 2.0.0 — is the natural point to decide. Recommendation recorded in F8
-   2026-10-10: keep `Move.toml` at 1.0.0 as the starting version of every generated coin, independent of
-   the npm version.)
+5. **OQ5** Should `Move.toml` `version` track the npm version? — **(Decided 2026-10-18: no. `Move.toml`
+   stays at `1.0.0`, the starting version of every generated coin, independent of the npm version; see F8.)**
 6. **OQ6** (new) Should the CLI generator call sui-token-client's validator and renderer (one rule
    set, one substitution algorithm), or keep a shell implementation with ported rules (F15)? —
    **(Decided 2026-10-08, `7d9c04b`: a shell implementation with the ported rules, pinned by
@@ -1225,7 +1227,7 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
   - **New:** F21 (summary misreports a declined burn), F22 (any CLI failure reads as "consumed"), F23
     (stale `CLAUDE.md` test list; unwritten `exports` layout contract), F24 (no `npm audit` step;
     ACCEPTED-RISK, empty tree); S8; B.TS-1/2/3 rows; invariants I13/I14.
-  - **Decided:** OQ3 (apply in `init`), OQ6 (shell port of the rules). OQ2, OQ5, OQ7 remain open.
+  - **Decided:** OQ3 (apply in `init`), OQ6 (shell port of the rules). OQ2, OQ5, OQ7 remain open (OQ5 since decided 2026-10-18).
   - **Not run:** `deploy_token.sh` on testnet (funded keystore and WAL; S1) and shellcheck (not installed
     here; green in CI).
 - 2026-10-10 (fix wave) — 1.0.9, commit `1faa903` (release by the orchestrator).
@@ -1253,3 +1255,5 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
   generated lock pins the new package (sui-token-client audit F21). F7 is RESOLVED and its Section D gate
   ticked. Open: F8 (OQ5), the maintainer items, and the first end-to-end `deploy_token.sh` run on testnet
   (`OPERATOR_TASKS.md`).
+- **2026-10-18 — F8 closed.** `Move.toml` `version` stays independent at `1.0.0` (ADJUDICATED; OQ5 decided): the
+  value belongs to the generated coin, nothing reads it, and tracking npm would churn every generated manifest.
