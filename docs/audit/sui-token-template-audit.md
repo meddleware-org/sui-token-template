@@ -1265,3 +1265,5 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
   verified from `package.json` and the lockfiles: sui-token-client 0.0.11 (exact pin `1.0.9`), docs and dev
   (`^1.0.9`, lockfiles resolve 1.0.9), and token-deployer-ui through sui-token-client (`^0.0.11`). The
   "Next for the orchestrator" item of the 2026-10-10 entry is done. No Section D box waited only on the release.
+- **2026-10-19** — dependency-bot status checked (read-only): `.github/dependabot.yml` carries the `ignore` rules and the repository has no open Dependabot pull requests (`gh pr list`, 2026-10-19). Versions, findings and gates were not re-examined in this pass.
+  - Dependabot policy encoded in .github/dependabot.yml (majors declined); open PRs merged 2026-10-19
