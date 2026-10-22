@@ -1047,7 +1047,7 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
   — F21, F22 (RESOLVED 1.0.9, commit `1faa903`; `tests/generator.test.sh`, stub-CLI cases)
 - [x] `CLAUDE.md` and the README match the code, including the `exports` layout contract — F23 (RESOLVED
   1.0.9, commit `1faa903`)
-- [ ] documented custody for `TreasuryCap` / `MetadataCap` per token (OQ2) — maintainer decision
+- [ ] documented custody for `TreasuryCap` / `MetadataCap` per token (OQ2) — decided 2026-10-22 (both caps go to the recipient); the script and README change land in the next release
 - [x] `Move.lock` shipped and carried into generated packages — F7 (RESOLVED: 1.0.9, commit `1faa903` for the
   npm package and `03_create_token.sh`; sui-token-client 0.0.11, commit `994b951`, for the packages it renders)
 - [ ] external audit of the template and generators — maintainer item (mainnet)
@@ -1146,6 +1146,7 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
 2. **OQ2** What is the default custody for `MetadataCap` in `deploy_token.sh` — keep with the
    deployer (today), transfer with the `TreasuryCap`, or delete? With `FROZEN_METADATA` the cap is
    deleted (1.0.8); the question concerns the updatable case.
+   *(Decided 2026-10-22: the `MetadataCap` goes with the `TreasuryCap` to the recipient. Whoever controls the coin's supply also controls its description and icon; splitting the two caps leaves a deployer who is not the token's owner able to change what holders see. This changes `deploy_token.sh` (and the README custody text) and is a requirement for the next release; the script is not edited in this pass.)*
 3. **OQ3** Should "fixed supply" / "frozen metadata" switch to `make_supply_fixed` /
    `delete_metadata_cap` (F6)? — **(Decided 2026-10-09, `5451c0e`: yes, applied inside `init`
    (`make_supply_fixed`, `finalize_and_delete_metadata_cap`) so the registry records them in the publish
@@ -1267,3 +1268,4 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
   "Next for the orchestrator" item of the 2026-10-10 entry is done. No Section D box waited only on the release.
 - **2026-10-19** — dependency-bot status checked (read-only): `.github/dependabot.yml` carries the `ignore` rules and the repository has no open Dependabot pull requests (`gh pr list`, 2026-10-19). Versions, findings and gates were not re-examined in this pass.
   - Dependabot policy encoded in .github/dependabot.yml (majors declined); open PRs merged 2026-10-19
+- **2026-10-22** (audit close-out) — OQ2 decided: the `MetadataCap` goes with the `TreasuryCap` to the recipient (the `deploy_token.sh` and README change land in the next release; no code changed here). The Section D custody box stays open until that release documents it. Counts unchanged.
