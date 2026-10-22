@@ -133,7 +133,7 @@ registry.** Every finding from the third pass is closed except two residual Info
 
 - F8 (`Move.toml` version vs npm) is ADJUDICATED (OQ5 decided 2026-10-18: independent); F18 is RESOLVED (the unused alias
   went with the 1.0.8 rewrite).
-- Not run: `deploy_token.sh` end to end on testnet (needs a funded keystore and WAL; S1).
+- `deploy_token.sh` end to end on testnet: **run 2026-10-22, passed** (S1; evidence in the re-verification log). The gate is closed; it is repeated before each template release.
 
 ---
 
@@ -701,8 +701,8 @@ statement about the CLI behaviour that requires `test-publish`, not a pin.
   filled in by hand; the record file is the machine copy (as for `publish.sh`).
 - **Types.** The capabilities and `Currency` are selected with `endswith($t)` on the exact type, as in
   `publish.sh`.
-- **Not run:** the pipeline end to end on testnet (needs a funded keystore and WAL; S1). The CLI behaviour
-  its parsing relies on was exercised through the localnet runs of the generated `publish.sh`.
+- **Run end to end on testnet 2026-10-22 (S1):** all eight phases passed against the real CLI and Walrus (see the log entry); no script change was needed. The CLI behaviour
+  its parsing relies on had been exercised through the localnet runs of the generated `publish.sh`.
 
 ### F18 — Source hygiene: an unused alias in the non-test build
 
@@ -1017,7 +1017,7 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
 | `finalize_registration`, `set_icon_url`, `make_immutable` | no (needs the system registry `0xc`) | localnet | verified 2026-10-09 with generated `publish.sh` (fixed/frozen and mintable/updatable coins) |
 | Registry records of a patched coin | no | localnet / testnet | sui-token-client `e2e:localnet` and token-deployer-ui `e2e:testnet` (both PASS 2026-10-09) |
 | `deploy_token.sh` burn reporting and summary (whole script, stub `sui` / `walrus`) | yes (shell harness, CI) | — | F21, F22 |
-| `deploy_token.sh` end to end | no | testnet with Walrus | S1 (maintainer; funded keystore and WAL) |
+| `deploy_token.sh` end to end | no | testnet with Walrus | S1: run 2026-10-22 (passed; repeat before each template release; testnet SUI and WAL only, an isolated `sui` config holding a throwaway funded key) |
 
 ---
 
@@ -1036,8 +1036,7 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
 - [x] generated `publish.sh` verified on localnet (F1; re-run 2026-10-09)
 - [x] the sui-token-client coupling pinned and checked — F9
 - [x] preflight CLI pin derived from `build-info.json` — F16 (RESOLVED 1.0.7)
-- [ ] `deploy_token.sh` exercised end to end on testnet (S1) — maintainer-only: needs a funded testnet
-  keystore and WAL for the Walrus upload
+- [x] `deploy_token.sh` exercised end to end on testnet (S1) — 2026-10-22: preflight, Walrus upload, generate, build and test, publish, `finalize_registration`, UpgradeCap burn (verified gone), hand-over; fixed supply and frozen metadata read back from the `Currency` (publish `6vsXr2Vqbj2Ma6gCv1xfKDNmNMxQ72cqCjddiNTxtTy2`, finalize `98Z7VTRtQfdrgpmVQt6MfjZLcrGvcB1fUMtuJaF7wvEZ`, transfer `E9qU7DipEjq1b77vv9n6wkvJAVfkSgNsCx8h8M6bYoQa`)
 
 ### pre-mainnet (for tokens generated from it)
 
@@ -1123,7 +1122,7 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
 ## Implementation suggestions (SHOULD / MAY)
 
 - **S1** SHOULD run `deploy_token.sh` end to end on testnet before each template release (needs a funded
-  keystore and WAL; **not run**).
+  keystore and WAL). **Run 2026-10-22: passed** (log entry); repeat before the next release.
 - **S2** SHOULD verify in `deploy_token.sh` that the UpgradeCap is consumed after phase 6b, as
   `publish.sh` does. **Done in 1.0.7** (F17); the check is specific to a not-found response since 1.0.9 (F22).
 - **S3** MAY add `make_supply_burn_only` as a third supply option (deflationary tokens). Not done.
@@ -1163,7 +1162,9 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
 7. **OQ7** (new) Is the shell pipeline (`deploy_token.sh`) still a supported path now that
    sui-token-client exists, or should it be reduced to the per-instance `publish.sh`? (Open; it is kept
    and maintained in 1.0.7, 1.0.8 and 1.0.9, and F21 / F22 were fixed in 1.0.9 on the assumption that it
-   stays.)
+   stays.) **Evidence 2026-10-22:** the whole pipeline ran end to end on testnet without a script change (log entry), so keeping it costs
+   maintenance only; the question is still a product choice (two supported paths against one) and stays open. **Recommendation:** keep it as the
+   documented operator path (it is the only one that uploads the icon and hands the supply over in one run), and re-run it before each release.
 
 ## Risks (residual)
 
@@ -1174,8 +1175,8 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
 - **Generator coupling:** bytecode patching depends on constant-pool layout. A compiler change could
   alter it; this is caught by `build-bytecode.sh --check` and sui-token-client's `check:template`,
   not prevented.
-- **Unverified live pipeline:** `deploy_token.sh` has not been run end to end on testnet this pass (S1);
-  its confirmations and parsing are read and exercised through `publish.sh` on localnet only.
+- **Live pipeline:** `deploy_token.sh` ran end to end on testnet on 2026-10-22 (S1) with sui 1.81.0 and Walrus 1.57.0; it is
+  verified only for the versions and options of that run (fixed supply, frozen metadata, a burned UpgradeCap), and is repeated before each release.
 - **Misleading output on the shell path:** F21 and F22 (closed in 1.0.9) could make a package look
   immutable when it is not; the "not found" match depends on the CLI's error text (observed on 1.81.0), and
   an unrecognised text fails closed (a run that stops), never open.
@@ -1269,3 +1270,5 @@ only. Counts at 2026-10-10 (1.0.9, commit `1faa903`): 6 passed; **67 passed, 0 f
 - **2026-10-19** — dependency-bot status checked (read-only): `.github/dependabot.yml` carries the `ignore` rules and the repository has no open Dependabot pull requests (`gh pr list`, 2026-10-19). Versions, findings and gates were not re-examined in this pass.
   - Dependabot policy encoded in .github/dependabot.yml (majors declined); open PRs merged 2026-10-19
 - **2026-10-22** (audit close-out) — OQ2 decided: the `MetadataCap` goes with the `TreasuryCap` to the recipient (the `deploy_token.sh` and README change land in the next release; no code changed here). The Section D custody box stays open until that release documents it. Counts unchanged.
+- **2026-10-22** (live S1 run, no code change) — `deploy_token.sh` end to end on testnet: run 2026-10-22 on testnet with an isolated `sui` config (sui 1.81.0) and Walrus 1.57.0: `TOKEN_SUPPLY_POLICY=fixed`, `TOKEN_INITIAL_SUPPLY=1000`, `TOKEN_METADATA_POLICY=frozen`, prompts answered CONFIRM / BURN / TRANSFER; Walrus blob `NQPNWtL-e_mAYnyiF0NtEXjReVBtJKH19RJ-a_u6xa8` (object `0x4976162b…6517`, 50 epochs; the aggregator serves the uploaded bytes unchanged); package `0x73467227ff2ea79756ea5cac18162334adc43b83fb111aa836b3b2d3f9e77790` published in `6vsXr2Vqbj2Ma6gCv1xfKDNmNMxQ72cqCjddiNTxtTy2` (gas: computation 1,000,000 + storage 16,826,400 MIST), `finalize_registration` in `98Z7VTRtQfdrgpmVQt6MfjZLcrGvcB1fUMtuJaF7wvEZ` (`Currency<S1TOKEN>` `0x3ed5277b…3976`, shared), UpgradeCap `0x05320d35…e2bf` burned and read back as not found (the package object is `Immutable`), initial supply `Coin` `0x172fa21a…c03c` transferred in `E9qU7DipEjq1b77vv9n6wkvJAVfkSgNsCx8h8M6bYoQa` and re-read as owned by the treasury address. The `Currency` on chain reads `supply: Fixed(1000000000000)`, `metadata_cap_id: Deleted`, `regulated: Unregulated`, the Walrus `icon_url`; the compiled constants were `FIXED_SUPPLY = true`, `FROZEN_METADATA = true`; no TreasuryCap or MetadataCap exists for the holder. The generated package's 6 tests passed in phase 4. Whole pipeline: about 0.0257 SUI and 0.0086 WAL (50 epochs of a 79-byte icon).
+  - **Disposition:** the Section D box is ticked; OQ7 gets the evidence and a recommendation (still open, a product choice); no finding was opened or changed and no script bug was found. Not exercised: the mintable/updatable options (they are covered by the localnet `publish.sh` runs and sui-token-client's testnet e2e), mainnet, and the `alreadyCertified` branch of the Walrus upload.
