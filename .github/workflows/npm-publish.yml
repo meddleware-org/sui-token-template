@@ -19,7 +19,7 @@ jobs:
     uses: ./.github/workflows/move-ci.yml
 
   publish-npm:
-    name: npmjs (@meddleware/sui-token-template)
+    name: npmjs (@meddleware/token-issuance-template-sui)
     needs: verify
     runs-on: ubuntu-latest
     permissions:

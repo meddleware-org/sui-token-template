@@ -36,7 +36,7 @@ This design ensures the coin type is a trust commitment that cannot be altered u
 
 - **This package:** Type definition, initialization, metadata commitment. Nothing else.
 - **Downstream consumer packages:** Minting, burning, accounting, application logic.
-- **`@meddleware/sui-walrus`:** Off-chain asset metadata (icons, extended descriptions).
+- **`@meddleware/sui-walrus-storage`:** Off-chain asset metadata (icons, extended descriptions).
 
 This separation keeps the coin primitive minimal and auditable.
 
@@ -144,7 +144,7 @@ my_token/         # Example: a generated concrete instance
 6. Renames source file: `sui_token_template.move` → `$TOKEN_MODULE_NAME.move`.
 7. Validates no `sui_token_template` identifier remains (catches incomplete substitution).
 
-**Idempotency:** Running again with the same output directory updates the instance in place (generated files are overwritten; other files, `.env.<network>` and `deployments.md` edits aside, are not touched). This is the intended workflow for updating (e.g., setting icon URL before mainnet). The package is generated in a temporary directory and installed only after every check passed, so a failing run leaves an existing directory byte-identical; the script refuses `/`, `$HOME`, `.` and a git work-tree root unless `FORCE_OUTPUT_DIR=1`. Every value is validated with the rules of `@meddleware/sui-token-client`'s `assertTokenConfig` and written literally (exact tokens and whole lines, one pass); `tests/generator.test.sh` pins this.
+**Idempotency:** Running again with the same output directory updates the instance in place (generated files are overwritten; other files, `.env.<network>` and `deployments.md` edits aside, are not touched). This is the intended workflow for updating (e.g., setting icon URL before mainnet). The package is generated in a temporary directory and installed only after every check passed, so a failing run leaves an existing directory byte-identical; the script refuses `/`, `$HOME`, `.` and a git work-tree root unless `FORCE_OUTPUT_DIR=1`. Every value is validated with the rules of `@meddleware/token-issuance-client`'s `assertTokenConfig` and written literally (exact tokens and whole lines, one pass); `tests/generator.test.sh` pins this.
 
 ### `scripts/deploy_token.sh` — Full Deployment Pipeline
 
@@ -205,7 +205,7 @@ re-run resumes rather than republishing. Unknown arguments are rejected.
 - `Move.toml` `version` (1.0.0) is copied into every generated package and is not synchronised with the
   npm version; whether it should be is an open question (audit F8 / OQ5). Do not bump it casually: a
   change alters the manifest every generated package starts from.
-- Consumers (`@meddleware/sui-token-client`) read the bytecode and check `build-info.json` instead of
+- Consumers (`@meddleware/token-issuance-client`) read the bytecode and check `build-info.json` instead of
   compiling.
 
 ## Working Rules
@@ -278,7 +278,7 @@ VITE_COIN_TYPE=0x<PACKAGE_ID>::<MODULE_NAME>::<STRUCT_NAME>
 
 Update after deployment to ensure the frontend uses the correct coin type.
 
-### Walrus Blob Lifetime (`@meddleware/sui-walrus`)
+### Walrus Blob Lifetime (`@meddleware/sui-walrus-storage`)
 
 The icon URL (from Phase 2 of deploy_token.sh) is immutable on-chain. Off-chain lifetime management:
 

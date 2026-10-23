@@ -316,7 +316,7 @@ CLI (workspace decision D23):
 | `bytecode/sui_token_template.mv` | `sui move build --build-env testnet` output (publishable; never the instrumented `sui move test` bytecode) |
 | `bytecode/build-info.json` | `toolchainVersion`, `buildEnv`, `frameworkRev` (from `Move.lock`), `sourceSha256`, `moduleSha256` |
 
-Both are exported (`@meddleware/sui-token-template/bytecode/…`). `Move.lock` is committed so the
+Both are exported (`@meddleware/token-issuance-template-sui/bytecode/…`). `Move.lock` is committed so the
 build is reproducible; CI rebuilds with the pinned CLI and fails if the shipped bytecode differs
 (`npm run check:bytecode`). After changing the source: `npm run build:bytecode` and commit. To move to
 a newer framework: delete `Move.lock`, rebuild, review, commit. `Move.lock` also ships in the npm package and `03_create_token.sh` copies it into every generated package (root entry renamed), so a generated coin builds against the framework revision the template was tested with; an existing instance keeps its own lock on regeneration.
@@ -325,8 +325,8 @@ a newer framework: delete `Move.lock`, rebuild, review, commit. `Move.lock` also
 
 `package.json` `exports` exposes only `./package.json`, `./bytecode/sui_token_template.mv` and
 `./bytecode/build-info.json`. Everything else is shipped by the `files` whitelist and is **read by path**
-from the package directory (`require.resolve('@meddleware/sui-token-template/package.json')`, then the
-directory). Consumers (today `@meddleware/sui-token-client`'s `gen-template.mjs`) may rely on these paths
+from the package directory (`require.resolve('@meddleware/token-issuance-template-sui/package.json')`, then the
+directory). Consumers (today `@meddleware/token-issuance-client`'s `gen-template.mjs`) may rely on these paths
 for the lifetime of the major version, and a change to any of them is a breaking release:
 
 | Path | Contract |
@@ -337,7 +337,7 @@ for the lifetime of the major version, and a change to any of them is a breaking
 | `Move.toml`, `Move.lock` | the manifest and the framework pin a generated package starts from |
 | `scripts/` | the generators and the pipeline; read by operators, not imported |
 
-`docs/audit/` is not shipped. `sui-token-client`'s `check:template` (hashes against `build-info.json`) is the
+`docs/audit/` is not shipped. `token-issuance-client`'s `check:template` (hashes against `build-info.json`) is the
 drift detector.
 
 ## Template Source (`sources/sui_token_template.move`)

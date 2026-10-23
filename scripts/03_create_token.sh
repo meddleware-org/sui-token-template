@@ -29,7 +29,7 @@ set -euo pipefail
 #                           (the MetadataCap is deleted: name, symbol, description and icon can never
 #                           change and the registry reports it)
 #
-# Every value is validated with the same rules as @meddleware/sui-token-client's assertTokenConfig before
+# Every value is validated with the same rules as @meddleware/token-issuance-client's assertTokenConfig before
 # anything is written (identifiers, safe text without quotes or backslashes, per-field limits, decimals
 # 0-18, https:// or ipfs:// icons). Values are substituted by exact token or line in a single pass, so
 # characters such as & | \ / cannot change what is written and inserted text is never rescanned.
@@ -94,7 +94,7 @@ if [[ "${FORCE_OUTPUT_DIR:-}" != "1" ]]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Input validation (mirrors @meddleware/sui-token-client rules.ts: assertTokenConfig).
+# Input validation (mirrors @meddleware/token-issuance-client rules.ts: assertTokenConfig).
 # ─────────────────────────────────────────────────────────────────────────────
 MOVE_RESERVED=" abort acquires as break const continue copy else entry enum false for friend fun has if in invariant let loop macro match module move mut native package phantom public return script spec struct true type use while key store drop "
 

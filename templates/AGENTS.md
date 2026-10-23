@@ -6,7 +6,7 @@ The deployed XSYMBOLX coin type for XPROJECTNAMEX (Sui testnet/mainnet).
 
 Coin type: `<PACKAGE_ID>::XMODULENAMEX::XSTRUCTNAMEX`
 
-Generated from `sui-token-template`. Becomes immutable once `scripts/publish.sh` is run with `--confirm-immutable` (or the interactive CONFIRM prompt is accepted) — this burns the UpgradeCap via `0x2::package::make_immutable`. Verify by confirming the UpgradeCap is gone: `sui client object <UPGRADE_CAP_ID>` must fail (object deleted) — a package object is always `Immutable`-owned, so its owner field proves nothing.
+Generated from `token-issuance-template-sui`. Becomes immutable once `scripts/publish.sh` is run with `--confirm-immutable` (or the interactive CONFIRM prompt is accepted) — this burns the UpgradeCap via `0x2::package::make_immutable`. Verify by confirming the UpgradeCap is gone: `sui client object <UPGRADE_CAP_ID>` must fail (object deleted) — a package object is always `Immutable`-owned, so its owner field proves nothing.
 
 ## Coin Registry Pattern
 
@@ -45,4 +45,4 @@ sui client objects FILL_IN_AFTER_DEPLOY | grep -i treasurycap
 | `deployments.md` | Artefact IDs (package, TreasuryCap, MetadataCap, Currency object, blob) |
 | `scripts/publish.sh` | Build + publish + finalize_registration + set initial icon URL |
 
-For template-level guidance, see `sui-token-template/AGENTS.md`.
+For template-level guidance, see `token-issuance-template-sui/AGENTS.md`.

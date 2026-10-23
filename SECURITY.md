@@ -10,7 +10,7 @@ This policy covers security issues in:
 - The generator and deployment scripts (`scripts/03_create_token.sh`, `scripts/deploy_token.sh`) and
   the per-instance publish script shipped to every generated package (`templates/publish.sh`) — as
   they affect capability custody, `UpgradeCap` handling and correct registry finalisation.
-- The npm package `@meddleware/sui-token-template`, as consumed by `@meddleware/token-deployer-ui`
+- The npm package `@meddleware/token-issuance-template-sui`, as consumed by `@meddleware/token-issuance-ui`
   (template source + precompiled bytecode parity).
 
 It does not cover:
@@ -19,7 +19,7 @@ It does not cover:
   [Sui project](https://github.com/MystenLabs/sui/security)).
 - Tokens that have already been generated and published — each is an independent package; their
   capability custody is the deployer's responsibility.
-- The operator fee charged by `token-deployer-ui` (implemented in that app's transaction, not here).
+- The operator fee charged by `token-issuance-ui` (implemented in that app's transaction, not here).
 
 ## Security model (invariants)
 

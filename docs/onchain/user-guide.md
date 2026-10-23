@@ -4,7 +4,7 @@ title: Token template — what your coin can and cannot do
 
 # Token template — what your coin can and cannot do
 
-When you create a coin with the Token Deployer, a new Sui package is published for it. This page
+When you create a coin with the Token Issuance, a new Sui package is published for it. This page
 explains what that coin can do afterwards, who controls it, and the choices that are permanent.
 
 ## Permanent from the moment you publish

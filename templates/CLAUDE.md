@@ -13,7 +13,7 @@
 ## What This Package Is
 
 This is the concrete XSYMBOLX coin type for XPROJECTNAMEX. It was generated from the
-`sui-token-template` and deployed to Sui testnet/mainnet.
+`token-issuance-template-sui` and deployed to Sui testnet/mainnet.
 
 Coin type: `<PACKAGE_ID>::XMODULENAMEX::XSTRUCTNAMEX`
 
@@ -64,8 +64,8 @@ Currency object, Walrus blob).
 ## Working Rules
 
 - Do not manually edit `sources/XMODULENAMEX.move`. If regeneration is needed, use `create_token.sh`
-  from the `sui-token-template` scripts. The icon URL is never hardcoded here — it is
+  from the `token-issuance-template-sui` scripts. The icon URL is never hardcoded here — it is
   supplied per-network via the `XSTRUCTNAMEX_ICON_URL` env var consumed by `scripts/publish.sh`.
 - With the `updatable` metadata policy, description and icon URL may be updated post-deploy via
   `MetadataCap` (governance-gated). Name, symbol, and decimals are permanently fixed.
-- Refer to `sui-token-template/CLAUDE.md` for template-level guidance.
+- Refer to `token-issuance-template-sui/CLAUDE.md` for template-level guidance.

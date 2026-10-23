@@ -39,7 +39,7 @@ Once published, the token type will be:
 
 ## Design Philosophy
 
-This token package was generated from [sui-token-template](https://github.com/MeddleWare-Org/sui-token-template) and is intentionally minimal:
+This token package was generated from [token-issuance-template-sui](https://github.com/MeddleWare-Org/token-issuance-template-sui) and is intentionally minimal:
 
 - **No minting/burning logic of its own** — `init` mints the initial supply once. Supply policy `fixed` then hands the `TreasuryCap` to the coin registry (`make_supply_fixed`), so the supply can never grow and `is_supply_fixed` / `total_supply` report it; `mintable` sends the `TreasuryCap` to the publisher, who can mint more (governed by the downstream packages that consume the coin type).
 - **Metadata policy** — Name, symbol, and decimals are always permanently fixed. `updatable`: description and icon URL stay updatable via `MetadataCap<XSTRUCTNAMEX>` (governance-gated). `frozen`: `init` deletes the `MetadataCap` (`finalize_and_delete_metadata_cap`), so nothing can change and `is_metadata_cap_deleted` reports it; the icon is then the `ICON_URL` constant. Both policies are applied by `init` in the publish transaction, so there is no later moment at which a cap exists unprotected. The policy values are the generated constants `INITIAL_SUPPLY`, `FIXED_SUPPLY` and `FROZEN_METADATA` in `sources/XMODULENAMEX.move`.

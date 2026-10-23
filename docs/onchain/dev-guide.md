@@ -24,18 +24,18 @@ integrate with the resulting coin. See the [API reference](api-reference.md) for
    `INITIAL_SUPPLY = 1_000_000_007`, `FIXED_SUPPLY = true`, `FROZEN_METADATA = false` — the two
    booleans differ so each keeps its own pool entry)
    and the identifiers `sui_token_template` / `SUI_TOKEN_TEMPLATE` are the contract with
-   `@meddleware/token-deployer-ui` (bytecode patching via `@mysten/move-bytecode-template`) and
+   `@meddleware/token-issuance-ui` (bytecode patching via `@mysten/move-bytecode-template`) and
    `scripts/03_create_token.sh` (source generation). Renaming or merging them breaks both.
 
-## Coupling with `token-deployer-ui`
+## Coupling with `token-issuance-ui`
 
-| Artefact in token-deployer-ui | Derived from | Kept in sync by |
+| Artefact in token-issuance-ui | Derived from | Kept in sync by |
 | --- | --- | --- |
-| `src/move-template/sui_token_template.mv` + base64 in `template.ts` | compiled template bytecode | `npm run regen:template` (builds from `node_modules/@meddleware/sui-token-template`) |
+| `src/move-template/sui_token_template.mv` + base64 in `template.ts` | compiled template bytecode | `npm run regen:template` (builds from `node_modules/@meddleware/token-issuance-template-sui`) |
 | `src/template-src/files.json` (downloadable source package) | `Move.toml`, source, `templates/*` | `npm run sync:template`; asserted by `tests/templateParity.test.ts` |
 | `TEMPLATE_DEFAULTS` / `TEMPLATE_IDENTIFIERS` | the constants above | `npm run verify:template` |
 
-After publishing a new template version: bump the dependency in token-deployer-ui, then run
+After publishing a new template version: bump the dependency in token-issuance-ui, then run
 `regen:template`, `sync:template` and `verify:template`.
 
 ## Deploying a generated package

@@ -1,18 +1,18 @@
 {
-  "name": "@meddleware/sui-token-template",
-  "version": "1.0.9",
+  "name": "@meddleware/token-issuance-template-sui",
+  "version": "1.0.10",
   "private": false,
   "type": "module",
   "author": "MeddleWare <dev@meddleware.co.uk>",
   "license": "0BSD",
   "description": "Generic Sui coin template and deployment pipeline for generating immutable coin packages. Ships the Move source, generator scripts, and the text files consumed by downstream source generators.",
-  "homepage": "https://github.com/meddleware-org/sui-token-template#readme",
+  "homepage": "https://github.com/meddleware-org/token-issuance-template-sui#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/meddleware-org/sui-token-template.git"
+    "url": "git+https://github.com/meddleware-org/token-issuance-template-sui.git"
   },
   "bugs": {
-    "url": "https://github.com/meddleware-org/sui-token-template/issues"
+    "url": "https://github.com/meddleware-org/token-issuance-template-sui/issues"
   },
   "publishConfig": {
     "access": "public"
